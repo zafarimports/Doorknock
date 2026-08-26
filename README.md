@@ -68,6 +68,20 @@ Then click **Upload list**. `sample-data/sample-walk-list.csv` is a 30-person de
 with coordinates already in it (invented names, real Cambridge, Ontario streets), so you
 can try the whole flow without waiting on the geocoder.
 
+### Put it online (free)
+
+The app is static files, so GitHub Pages hosts it for nothing:
+
+1. On GitHub go to **Settings → Pages → Build and deployment → Source** and pick
+   **GitHub Actions**.
+2. That's it. Every push to `main` builds and publishes automatically via
+   `.github/workflows/deploy.yml`, and the site appears at
+   `https://<your-user>.github.io/Doorknock/`.
+
+Netlify, Vercel and Cloudflare Pages work the same way: build command `npm run build`,
+publish directory `dist`. There is no server or database to deploy — the whole app is the
+`dist/` folder, and each person's data stays in their own browser.
+
 To build for production:
 
 ```bash
