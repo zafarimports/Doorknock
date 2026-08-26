@@ -7,15 +7,11 @@ import 'leaflet.markercluster/dist/MarkerCluster.Default.css';
 import { STATUS_MAP, type Household } from '../types';
 import { selectVisible, useStore } from '../state/store';
 import { initialsOf } from '../lib/normalize';
+import { getDemo } from '../lib/demo';
 import { jitter } from '../lib/geo';
 
 const TILE_LAYERS = {
   Streets: {
-    url: 'https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png',
-    attribution: '&copy; OpenStreetMap contributors &copy; CARTO',
-    maxZoom: 20,
-  },
-  'OSM classic': {
     url: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
     attribution: '&copy; OpenStreetMap contributors',
     maxZoom: 19,
@@ -26,6 +22,25 @@ const TILE_LAYERS = {
     maxZoom: 19,
   },
 } as const;
+
+const BLANK_TILE =
+  'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7';
+
+/** Serves map tiles out of an embedded pack so the demo build needs no network. */
+function packedTileLayer(): L.TileLayer | undefined {
+  const tiles = getDemo()?.tiles;
+  if (!tiles) return undefined;
+  const Packed = L.TileLayer.extend({
+    getTileUrl(coords: L.Coords) {
+      return tiles[`${coords.z}/${coords.x}/${coords.y}`] ?? BLANK_TILE;
+    },
+  }) as unknown as new (url: string, options: L.TileLayerOptions) => L.TileLayer;
+  return new Packed('', {
+    maxNativeZoom: getDemo()?.maxNativeZoom ?? 16,
+    maxZoom: 19,
+    attribution: '&copy; OpenStreetMap contributors — offline tile pack',
+  }) as L.TileLayer;
+}
 
 function pinIcon(h: Household, label: string, selected: boolean): L.DivIcon {
   const meta = STATUS_MAP[h.status];
@@ -90,8 +105,10 @@ export default function MapView() {
     });
     const layers = Object.fromEntries(
       Object.entries(TILE_LAYERS).map(([name, cfg]) => [name, L.tileLayer(cfg.url, cfg)]),
-    ) as Record<keyof typeof TILE_LAYERS, L.TileLayer>;
-    layers.Streets.addTo(map);
+    ) as Record<string, L.TileLayer>;
+    const packed = packedTileLayer();
+    if (packed) layers['Offline pack'] = packed;
+    (packed ?? layers.Streets).addTo(map);
     L.control.layers(layers, undefined, { position: 'topright' }).addTo(map);
     L.control.zoom({ position: 'topright' }).addTo(map);
     L.control.scale({ position: 'bottomleft', imperial: false }).addTo(map);

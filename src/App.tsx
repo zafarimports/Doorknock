@@ -5,6 +5,9 @@ import HouseholdPanel from './components/HouseholdPanel';
 import ImportWizard from './components/ImportWizard';
 import { useStore } from './state/store';
 import { loadState, saveState } from './lib/storage';
+import { getDemo } from './lib/demo';
+import { readWorkbook } from './lib/parse';
+import { guessMapping } from './lib/normalize';
 
 export default function App() {
   const hydrated = useStore((s) => s.hydrated);
@@ -19,7 +22,7 @@ export default function App() {
 
   // restore the workspace from IndexedDB on first paint
   useEffect(() => {
-    void loadState().then((state) => {
+    void loadState().then(async (state) => {
       useStore.getState().hydrate(
         state ?? {
           households: [],
@@ -30,6 +33,16 @@ export default function App() {
           sourceColumns: [],
         },
       );
+      // the demo build ships a starter list so the map is never empty on arrival
+      const demo = getDemo();
+      if (demo?.csv && !useStore.getState().households.length) {
+        const sheets = await readWorkbook(new File([demo.csv], 'demo.csv', { type: 'text/csv' }));
+        const sheet = sheets[0];
+        if (sheet?.rows.length) {
+          useStore.getState().importRows(sheet.rows, guessMapping(sheet.headers), sheet.headers, { replace: true });
+          if (demo.note) useStore.getState().notify(demo.note);
+        }
+      }
     });
   }, []);
 
