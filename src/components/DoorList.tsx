@@ -1,12 +1,14 @@
 import { useMemo, useState } from 'react';
 import { STATUSES, STATUS_MAP, type Household } from '../types';
-import { selectVisible, useStore } from '../state/store';
+import { useStore } from '../state/store';
+import { useVisibleHouseholds } from '../state/useVisible';
 import { distance, formatDistance } from '../lib/geo';
+import { watchPosition } from '../lib/geolocation';
 
 type SortKey = 'walk' | 'name' | 'status' | 'nearby';
 
 export default function DoorList() {
-  const visible = useStore(selectVisible);
+  const visible = useVisibleHouseholds();
   const people = useStore((s) => s.people);
   const filters = useStore((s) => s.filters);
   const turfs = useStore((s) => s.turfs);
@@ -15,6 +17,7 @@ export default function DoorList() {
   const [sort, setSort] = useState<SortKey>('walk');
   const [here, setHere] = useState<[number, number]>();
   const [limit, setLimit] = useState(120);
+  const [showFilters, setShowFilters] = useState(false);
 
   const namesByHousehold = useMemo(() => {
     const map = new Map<string, string[]>();
@@ -54,14 +57,17 @@ export default function DoorList() {
   }, [visible, sort, here, namesByHousehold]);
 
   const locate = () => {
-    navigator.geolocation.getCurrentPosition(
-      (pos) => {
-        setHere([pos.coords.latitude, pos.coords.longitude]);
+    const stop = watchPosition({
+      onFix: (fix) => {
+        setHere([fix.lat, fix.lng]);
         setSort('nearby');
+        stop();
       },
-      () => useStore.getState().notify('Could not get your location', 'error'),
-      { enableHighAccuracy: true, timeout: 8000 },
-    );
+      onError: (message) => {
+        useStore.getState().notify(message, 'error');
+        stop();
+      },
+    });
   };
 
   const toggleStatus = (id: (typeof STATUSES)[number]['id']) => {
@@ -80,7 +86,10 @@ export default function DoorList() {
           value={filters.search}
           onChange={(e) => useStore.getState().setFilters({ search: e.target.value })}
         />
-        <div className="filter-row">
+        <button className="btn btn--ghost btn--block" onClick={() => setShowFilters((v) => !v)}>
+          {showFilters ? 'Hide filters' : `Filters (${sorted.length} of ${households.length} doors)`}
+        </button>
+        <div className="filter-row" hidden={!showFilters}>
           <select value={filters.poll ?? ''} onChange={(e) => useStore.getState().setFilters({ poll: e.target.value || undefined })}>
             <option value="">All polls</option>
             {polls.map((p) => (
@@ -112,7 +121,7 @@ export default function DoorList() {
             <option value="nearby">Closest to me</option>
           </select>
         </div>
-        <div className="chip-row">
+        <div className="chip-row" hidden={!showFilters}>
           <button
             className={`filter-chip ${filters.unknockedOnly ? 'filter-chip--on' : ''}`}
             onClick={() => useStore.getState().setFilters({ unknockedOnly: !filters.unknockedOnly })}
@@ -134,15 +143,15 @@ export default function DoorList() {
             filters.poll ||
             filters.city ||
             filters.turfId ||
+            filters.canvasserId ||
+            filters.hiddenCommunities.length > 0 ||
             filters.unknockedOnly) && (
             <button className="filter-chip filter-chip--clear" onClick={() => useStore.getState().resetFilters()}>
               Clear
             </button>
           )}
         </div>
-        <p className="muted small">
-          {sorted.length} of {households.length} doors
-        </p>
+
       </div>
 
       <ul className="door-list__items">

@@ -4,24 +4,39 @@ import MenuPanel, { type MenuSection } from './components/MenuPanel';
 import LayersPanel from './components/LayersPanel';
 import HouseholdPanel from './components/HouseholdPanel';
 import ImportWizard from './components/ImportWizard';
-import { selectVisible, useStore } from './state/store';
-import { loadState, saveState } from './lib/storage';
+import { useStore } from './state/store';
+import { useVisibleHouseholds } from './state/useVisible';
+import { loadState, requestPersistence, saveState } from './lib/storage';
 import { getDemo } from './lib/demo';
 import { readWorkbook } from './lib/parse';
 import { guessMapping } from './lib/normalize';
 import { STATUS_MAP } from './types';
+import { useGeocoder } from './state/useGeocoder';
 
 export default function App() {
   const hydrated = useStore((s) => s.hydrated);
   const households = useStore((s) => s.households);
   const selectedId = useStore((s) => s.selectedHouseholdId);
   const toast = useStore((s) => s.toast);
-  const visible = useStore(selectVisible);
+  const visible = useVisibleHouseholds();
 
   const [showImport, setShowImport] = useState(false);
   const [menu, setMenu] = useState<MenuSection>();
   const [layersOpen, setLayersOpen] = useState(false);
   const saveTimer = useRef<number>();
+  const { start: startGeocoding, running: geocoding, progress: geocodeProgress } = useGeocoder();
+  const [offline, setOffline] = useState(!navigator.onLine);
+  const followMe = useStore((s) => s.settings.followMe);
+
+  useEffect(() => {
+    const update = () => setOffline(!navigator.onLine);
+    window.addEventListener('online', update);
+    window.addEventListener('offline', update);
+    return () => {
+      window.removeEventListener('online', update);
+      window.removeEventListener('offline', update);
+    };
+  }, []);
 
   const progress = useMemo(() => {
     const knocked = visible.filter((h) => STATUS_MAP[h.status].knocked).length;
@@ -30,6 +45,7 @@ export default function App() {
 
   // restore the workspace from IndexedDB on first paint
   useEffect(() => {
+    void requestPersistence();
     void loadState().then(async (state) => {
       useStore.getState().hydrate(
         state ?? {
@@ -68,8 +84,10 @@ export default function App() {
         sourceColumns: s.sourceColumns,
       };
     };
+    let dirtySince = 0;
     const flush = () => {
       window.clearTimeout(saveTimer.current);
+      dirtySince = 0;
       void saveState(snapshot());
     };
     // canvassers lock the phone seconds after a knock — never lose that write
@@ -78,7 +96,21 @@ export default function App() {
     };
     document.addEventListener('visibilitychange', onHide);
     window.addEventListener('pagehide', flush);
+
+    let previous = snapshot();
     const unsubscribe = useStore.subscribe(() => {
+      const next = snapshot();
+      // geocode progress and toasts churn several times a second; only real data
+      // changes deserve a write, and a long run must not defer one indefinitely
+      const changed = (Object.keys(next) as (keyof typeof next)[]).some((k) => next[k] !== previous[k]);
+      previous = next;
+      if (!changed) return;
+      const now = Date.now();
+      if (!dirtySince) dirtySince = now;
+      if (now - dirtySince > 5000) {
+        flush();
+        return;
+      }
       window.clearTimeout(saveTimer.current);
       saveTimer.current = window.setTimeout(flush, 400);
     });
@@ -121,10 +153,37 @@ export default function App() {
           </span>
           <span className="muted small">knocked</span>
         </div>
-        <button className="topbar__btn" onClick={() => setLayersOpen((v) => !v)} aria-label="Layers">
+        <button
+          className={`topbar__btn ${followMe ? 'topbar__btn--on' : ''}`}
+          onClick={() => useStore.getState().requestRecenter()}
+          aria-label="Show where I am"
+          title="Show where I am"
+        >
+          ◎
+        </button>
+        <button
+          className={`topbar__btn ${layersOpen ? 'topbar__btn--on' : ''}`}
+          onClick={() => setLayersOpen((v) => !v)}
+          aria-label="Layers"
+          title="Layers"
+        >
           ◍
         </button>
       </header>
+
+      {offline && (
+        <div className="banner">
+          No signal — the map and address lookups need one. Knocking and notes still work.
+        </div>
+      )}
+
+      {geocoding && geocodeProgress && (
+        <div className="working" onClick={() => setMenu('data')}>
+          <span className="working__spin" />
+          Putting addresses on the map — {geocodeProgress.done} of {geocodeProgress.total}
+          {geocodeProgress.failed > 0 && ` · ${geocodeProgress.failed} not found`}
+        </div>
+      )}
 
       <main className="workspace">
         <div className="map-area">
@@ -155,7 +214,8 @@ export default function App() {
           onClose={() => setShowImport(false)}
           onImported={() => {
             setShowImport(false);
-            setMenu('data');
+            // finding the addresses is our job, not something to ask about
+            if (useStore.getState().households.some((h) => h.geocode === 'pending')) void startGeocoding();
           }}
         />
       )}

@@ -16,8 +16,27 @@ android {
             ignoreAssetsPattern '!.svn:!.git:!.ds_store:!*.scc:.*:!CVS:!thumbs.db:!picasa.ini:!*~'
         }
     }
+    signingConfigs {
+        // Release builds are signed with one stable key so an update installs over
+        // the previous version instead of forcing an uninstall (which would delete
+        // every knock recorded on the phone). Supply these as environment
+        // variables or gradle properties; see README.
+        release {
+            def storePath = System.getenv('DOORKNOCK_KEYSTORE') ?: project.findProperty('doorknockKeystore')
+            if (storePath) {
+                storeFile file(storePath)
+                storePassword System.getenv('DOORKNOCK_KEYSTORE_PASSWORD') ?: project.findProperty('doorknockKeystorePassword')
+                keyAlias System.getenv('DOORKNOCK_KEY_ALIAS') ?: project.findProperty('doorknockKeyAlias') ?: 'doorknock'
+                keyPassword System.getenv('DOORKNOCK_KEY_PASSWORD') ?: project.findProperty('doorknockKeyPassword')
+            }
+        }
+    }
+
     buildTypes {
         release {
+            if (System.getenv('DOORKNOCK_KEYSTORE') ?: project.findProperty('doorknockKeystore')) {
+                signingConfig signingConfigs.release
+            }
             minifyEnabled false
             proguardFiles getDefaultProguardFile('proguard-android.txt'), 'proguard-rules.pro'
         }

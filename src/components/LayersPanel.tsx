@@ -85,14 +85,16 @@ export default function LayersPanel({ onClose }: Props) {
             Response
           </button>
         </div>
-        <ul className="legend-list">
-          {(colorBy === 'community' ? COMMUNITIES : STATUSES).map((item) => (
-            <li key={item.id}>
-              <i style={{ background: item.color }} />
-              {item.label}
-            </li>
-          ))}
-        </ul>
+        {colorBy === 'response' && (
+          <ul className="legend-list">
+            {STATUSES.map((item) => (
+              <li key={item.id}>
+                <i style={{ background: item.color }} />
+                {item.label}
+              </li>
+            ))}
+          </ul>
+        )}
         <p className="muted small">A tick on the pin always means the door has been knocked.</p>
       </section>
 

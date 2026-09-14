@@ -29,7 +29,8 @@ export async function readWorkbook(file: File): Promise<SheetPreview[]> {
     const ws = wb.Sheets[name];
     const matrix = XLSX.utils.sheet_to_json<string[]>(ws, { header: 1, blankrows: false, defval: '', raw: false });
     const headerIdx = findHeaderRow(matrix);
-    const headerRow = (matrix[headerIdx] ?? []).map((h, i) => clean(h) || `Column ${i + 1}`);
+    const width = matrix.reduce((max, row) => Math.max(max, row?.length ?? 0), 0);
+    const headerRow = Array.from({ length: width }, (_, i) => clean((matrix[headerIdx] ?? [])[i]) || `Column ${i + 1}`);
     const headers = dedupeHeaders(headerRow);
     const rows: Record<string, string>[] = [];
     for (let r = headerIdx + 1; r < matrix.length; r++) {
@@ -47,15 +48,26 @@ export async function readWorkbook(file: File): Promise<SheetPreview[]> {
   });
 }
 
-/** Spreadsheets often carry a title row or two before the real header. */
+const HEADER_WORDS =
+  /\b(name|address|city|street|postal|zip|phone|email|poll|ward|unit|apt|community|group|religion|lat|lon|province|state|status|id)\b/i;
+
+/**
+ * Spreadsheets often carry a title row or two before the real header. Score rows
+ * on how much they look like labels — short, unique, non-numeric, using words we
+ * recognise — rather than just on how full they are, so a dense first data row
+ * cannot win and cost us a voter.
+ */
 function findHeaderRow(matrix: string[][]): number {
   let best = 0;
   let bestScore = -1;
   for (let r = 0; r < Math.min(matrix.length, 15); r++) {
-    const row = matrix[r] ?? [];
-    const filled = row.filter((c) => clean(c)).length;
-    const texty = row.filter((c) => clean(c) && Number.isNaN(Number(clean(c)))).length;
-    const score = filled + texty;
+    const cells = (matrix[r] ?? []).map((c) => clean(c)).filter(Boolean);
+    if (cells.length < 2) continue;
+    const unique = new Set(cells.map((c) => c.toLowerCase())).size;
+    const texty = cells.filter((c) => Number.isNaN(Number(c))).length;
+    const shortish = cells.filter((c) => c.length <= 30).length;
+    const known = cells.filter((c) => HEADER_WORDS.test(c)).length;
+    const score = cells.length + texty + shortish + unique + known * 4;
     if (score > bestScore) {
       bestScore = score;
       best = r;
@@ -139,9 +151,8 @@ export function buildRecords(
       households.set(key, household);
     }
 
-    const nameRaw =
-      pick('name') || [pick('firstName'), pick('lastName')].filter(Boolean).join(' ');
-    const parsed = parseName(nameRaw);
+    const splitName = [pick('firstName'), pick('lastName')].filter(Boolean).join(' ');
+    const parsed = parseName(splitName || pick('name'));
     const first = pick('firstName') ? titleCase(pick('firstName')) : parsed.first;
     const last = pick('lastName') ? titleCase(pick('lastName')) : parsed.last;
 
@@ -156,7 +167,7 @@ export function buildRecords(
       householdId: household.id,
       community,
       communitySource: community ? 'file' : undefined,
-      name: parsed.display || [first, last].filter(Boolean).join(' ') || 'Unnamed resident',
+      name: [first, last].filter(Boolean).join(' ') || parsed.display || 'Unnamed resident',
       firstName: first || undefined,
       lastName: last || undefined,
       occupancy: pick('occupancy') || undefined,

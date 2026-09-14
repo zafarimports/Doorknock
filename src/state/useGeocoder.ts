@@ -33,6 +33,7 @@ export function useGeocoder() {
 
       const controller = new AbortController();
       controllerRef.current = controller;
+      useStore.getState().registerGeocodeAbort(() => controller.abort());
       state.setGeocodeRunning(true);
       state.setGeocodeProgress({ done: 0, total: queue.length, ok: 0, failed: 0 });
 
@@ -41,6 +42,7 @@ export function useGeocoder() {
           households: queue,
           settings: state.settings,
           signal: controller.signal,
+          ignoreCachedMisses: opts.retryFailed,
           onResult: (id, hit) => useStore.getState().applyGeocode(id, hit),
           onProgress: (p) => useStore.getState().setGeocodeProgress(p),
           onError: (message) => useStore.getState().pushGeocodeError(message),
@@ -51,6 +53,7 @@ export function useGeocoder() {
         }
       } finally {
         controllerRef.current = null;
+        useStore.getState().registerGeocodeAbort(undefined);
         useStore.getState().setGeocodeRunning(false);
         useStore.getState().recomputeTurfMembership();
       }

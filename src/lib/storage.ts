@@ -31,6 +31,21 @@ export async function saveState(state: PersistedState): Promise<void> {
 
 export async function clearState(): Promise<void> {
   await del(KEY);
+  // otherwise yesterday's failed lookups are replayed as failures forever
+  await del(GEO_KEY);
+}
+
+/**
+ * Asks the browser not to evict our data under storage pressure. A day of knocks
+ * is not something Android should be free to reclaim.
+ */
+export async function requestPersistence(): Promise<boolean> {
+  try {
+    if (navigator.storage?.persisted && (await navigator.storage.persisted())) return true;
+    return (await navigator.storage?.persist?.()) ?? false;
+  } catch {
+    return false;
+  }
 }
 
 export type GeoCache = Record<string, { lat: number; lng: number; label?: string; precision?: string } | null>;

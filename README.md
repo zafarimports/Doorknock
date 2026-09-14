@@ -1,158 +1,161 @@
 # Doorknock
 
-A canvassing map you can run yourself. Upload a spreadsheet of people — names, street
-addresses, city, postal code — and every door becomes a pin. Tap a pin to see who lives
-there, record what happened at the door, take notes, and watch the pin change colour as
-your team works through the list.
+A canvassing map for people knocking doors. Load a spreadsheet of voters, get a pin for every
+door, colour the map by community, and record what happened at each door — on a phone, while
+walking, with your own position moving on the map.
 
-Everything runs in the browser. There is no server, no account, and no database to set up:
-the workspace lives in the browser's own storage and can be exported to a file.
+Runs as a website or as an Android app. No server, no account, no database: the data lives in
+the browser (or the app) on your device.
 
-![The door panel: residents, response buttons, tags and notes](docs/screenshot-door.png)
+![The door sheet: residents, response buttons, community and notes](docs/screenshot-door.png)
 
-_Basemap tiles are blank in these captures — the machine that took them had no route to the
-tile servers. They load normally on a real network._
+_Basemap tiles are blank in these captures — the machine that took them had no route to the tile
+servers. They load normally on a real network._
 
 ## What it does
 
-**Upload a list**
-- Reads `.xlsx`, `.xls` and `.csv` in the browser — nothing is uploaded anywhere.
-- Guesses which column is the name, the address, the city, the postal code, the poll, and
-  so on, and lets you correct any of them before importing.
-- Groups people living at the same address into one door, so a household of four is one
-  pin with four residents, not four overlapping pins.
-- Understands `LASTNAME, FIRSTNAME`, strips `UNIT 27` off the end of an address, and puts
-  the space back into Canadian postal codes (`N1S4C2` → `N1S 4C2`).
-- If your sheet already has latitude/longitude columns, it uses them and skips geocoding.
+**Load your list**
+- `.xlsx`, `.xls` or `.csv`, read in the browser — the file is never uploaded anywhere.
+- Guesses which column is the name, address, city, postal code, poll, community, and so on, and
+  lets you fix any of them before importing.
+- People at the same address become one door with several residents.
+- Understands `LASTNAME, FIRSTNAME`, strips `UNIT 27` off an address, and re-spaces Canadian
+  postal codes (`N1S4C2` → `N1S 4C2`).
+- Columns you don't map are kept and come back in the export.
 
-**Turn addresses into pins**
-- Geocodes the list against OpenStreetMap's Nominatim (free) or Mapbox (fast, needs a
-  token), one address at a time, with a progress bar you can pause and resume.
-- Every lookup is cached on disk, so re-importing the same list is instant.
-- Addresses that can't be found are listed for you; open one and drop its pin by hand.
+**Communities on the map**
+- Every door belongs to a group: **Muslim**, **Punjabi / Sikh**, **Hindu**, **Other minority**,
+  **Everyone else**, or **Not classified**.
+- The group comes from a column in your list (called Community, Group, Religion, Ethnicity…) or
+  from one tap on the door sheet.
+- Pins are coloured by group, and the ◍ **Layers** panel switches any group on or off, so you can
+  walk one community's doors and hide the rest.
+- Switch pin colour to **Response** when you'd rather see support and opposition.
+- The app does **not** guess a person's community from their name. Name matching is wrong often
+  enough to send a canvasser into the wrong conversation — put the classification in your
+  spreadsheet, where you control it, or set it at the door.
+
+**You, on the map**
+- A blue dot with an accuracy halo follows your GPS while you walk, so you can see which house is
+  next.
+- The map follows you until you drag it; the ◎ button starts following again.
+- On Android this uses the phone's real GPS through a native permission prompt.
 
 **Knock doors**
-- Click a pin — or a row in the door list — to open the door panel: residents, occupancy,
-  phone, email, poll, and every original column from your spreadsheet.
-- One tap marks the door knocked; the pin switches from a dashed outline with initials to
-  a solid check mark, and its colour follows the response you record.
-- Responses: strong support, leaning support, undecided, opposed, not home, come back
-  later, refused, moved, do not contact. A resident can carry a different response from
-  the rest of the household.
-- Timestamped notes, quick tags (sign requested, volunteer, needs ride, dog…), and inline
-  edits to phone and email when the file is out of date.
+- Tap a pin: residents, occupancy, phone, email, poll, and every original column from your sheet.
+- One tap marks the door knocked — the pin gets a tick.
+- Four responses cover almost every door (support, not home, undecided, opposed); the rest —
+  strong support, come back later, refused, moved, do not contact — are behind "More options".
+- Timestamped notes, quick tags (sign requested, volunteer, needs ride, dog…), and inline fixes to
+  phone and email when the list is out of date.
 
 **Organise the walk**
-- **Cut turf**: draw a shape on the map and every door inside becomes a turf, with its own
-  knocked/total progress bar.
-- **Team**: add canvassers, assign turf to them, and pick who is knocking — their name is
-  stamped on the knocks and notes they record.
-- Filter by response, poll, city, turf, canvasser, or "not knocked yet"; sort the list in
-  walk order (street, then house number) or by what is closest to you.
-- Live counters across the top of whatever you have filtered to.
+- **Turf**: draw a shape on the map and every door inside becomes a turf with its own progress.
+- **Team**: add canvassers, assign turf, pick who is knocking — their name is stamped on knocks and
+  notes.
+- Search and filter by response, poll, city, turf or canvasser; sort in walk order (street, then
+  house number) or by what is closest to you.
 
-**Get the data back out**
-- Export an `.xlsx` that keeps every original column and adds status, knocked-at, visits,
-  notes, tags, turf, canvasser and coordinates.
-- Export a project file (`.json`) to move the whole workspace — doors, turf, notes — to
-  another device, or to hand a turf off to someone else. Load it from the upload screen.
+**Get the data out**
+- An `.xlsx` that keeps every original column and adds status, knocked-at, visits, notes, tags,
+  community, turf, canvasser and coordinates.
+- A project `.json` that carries the whole workspace to another device.
 
-## Quick start
+## Run it on the web
 
 ```bash
 npm install
-npm run dev          # http://localhost:5173
+npm run dev            # http://localhost:5173
+npm run dev -- --host  # also reachable from your phone on the same wifi
 ```
 
-Then click **Upload list**. `sample-data/sample-walk-list.csv` is a 30-person demo list
-with coordinates already in it (invented names, real Cambridge, Ontario streets), so you
-can try the whole flow without waiting on the geocoder.
+`sample-data/placeholder-list.csv` is a placeholder list (no real people) with coordinates already
+in it, so you can try everything without waiting for geocoding.
 
-### Put it online (free)
+To publish it: `npm run build` produces a `dist/` folder of static files. Pushing to `main` deploys
+it to GitHub Pages automatically once Pages is switched on (Settings → Pages → Source: GitHub
+Actions).
 
-The app is static files, so GitHub Pages hosts it for nothing:
-
-1. On GitHub go to **Settings → Pages → Build and deployment → Source** and pick
-   **GitHub Actions**.
-2. That's it. Every push to `main` builds and publishes automatically via
-   `.github/workflows/deploy.yml`, and the site appears at
-   `https://<your-user>.github.io/Doorknock/`.
-
-Netlify, Vercel and Cloudflare Pages work the same way: build command `npm run build`,
-publish directory `dist`. There is no server or database to deploy — the whole app is the
-`dist/` folder, and each person's data stays in their own browser.
-
-To build for production:
+## Build the Android app
 
 ```bash
-npm run build        # static files in dist/ — host them anywhere
-npm run preview
+npm run build
+npx cap sync android
+cd android && ./gradlew assembleDebug
+# android/app/build/outputs/apk/debug/app-debug.apk
 ```
 
-`npm run dev -- --host` serves on your local network, which is the easy way to try it on a
-phone in the field.
+Requires JDK 21 and the Android SDK (platform 34+, build-tools 35). Pushing to `main` also builds
+the APK in GitHub Actions — download it from the run's artifacts.
 
-## What your spreadsheet needs
+**Installing it on a phone**
 
-Only a street address column is required. Everything else is optional and improves the
-result:
+1. Copy the `.apk` to the phone (email, Google Drive, or USB into Downloads).
+2. Open **Files → Downloads** and tap it.
+3. When Android says the source isn't allowed, tap **Settings → Allow from this source**, then Back.
+4. Tap **Install**. If Play Protect warns about an unknown app, choose **Install anyway** — that
+   warning is about sideloading, not about this app.
+5. Open Doorknock and choose **While using the app** when it asks for location. Leave "Precise" on.
 
-| Column | Example | Used for |
-| --- | --- | --- |
-| Name | `AYUB, SAMIA` | who lives there |
-| Property Address | `197 BLAIR RD` | the pin (required) |
-| City | `CAMBRIDGE` | geocoding accuracy |
-| Postal / ZIP | `N1S4C2` | geocoding accuracy |
-| Poll / ward | `Ward 05 Poll 501` | filtering |
-| Occupancy | `Owner`, `Tenant` | shown on the door panel |
-| Phone / email | | shown and editable |
-| Latitude / Longitude | `43.3689`, `-80.3298` | skips geocoding entirely |
+**Signing, and why it matters.** `assembleDebug` signs with a throwaway key, so a later build will
+refuse to install over an earlier one — and uninstalling wipes every knock stored on that phone.
+For anything beyond a first try, build a release with one stable key:
 
-Unmapped columns are not thrown away — they show up under "original spreadsheet fields" on
-the door panel and come back in the export.
+```bash
+keytool -genkey -v -keystore doorknock.keystore -alias doorknock \
+  -keyalg RSA -keysize 2048 -validity 10000
+DOORKNOCK_KEYSTORE=/path/to/doorknock.keystore \
+DOORKNOCK_KEYSTORE_PASSWORD=… DOORKNOCK_KEY_PASSWORD=… \
+  ./gradlew assembleRelease
+```
 
-## Geocoding, honestly
+Keep that keystore safe — it is the only thing that lets you ship updates. Export your data before
+uninstalling anything.
 
-- The default geocoder is OpenStreetMap's public Nominatim service. Its usage policy allows
-  about **one request per second**, so a 1,000-address list takes roughly 20 minutes. Leave
-  the tab open; it resumes where it left off and the cache means you only pay that cost
-  once per address.
-- Put an email address in **Data → settings** so OSM can contact you rather than block you
-  if a large run looks like abuse.
-- For anything bigger, switch to Mapbox and paste a token: same flow, roughly ten times
-  faster.
-- **Addresses do leave your browser when you geocode them** — that is the one network call
-  this app makes with your data, and it goes to whichever geocoder you pick. Names, notes,
-  phone numbers and responses never do.
+## Putting addresses on the map
+
+Addresses become pins through a geocoder:
+
+- **OpenStreetMap Nominatim** (default, free). Their policy allows about one address per second, so
+  1,000 doors take roughly 20 minutes. Results are cached, so you pay that once. Put an email
+  address in **List → settings** so OSM can contact you instead of blocking you.
+- **Mapbox** with a token — same flow, roughly ten times faster.
+- If your sheet already has latitude/longitude columns, nothing is geocoded at all.
+
+Addresses that can't be found are listed for you; open one and place its pin by hand.
+
+**This is the one time your data leaves the device**: the address is sent to whichever geocoder you
+pick. Names, notes, phone numbers, responses and community labels never are.
 
 ## Where the data lives
 
-In IndexedDB, in the browser you are using, on that device. Nothing syncs. That means:
+IndexedDB, in the browser or app on that device. Nothing syncs.
 
-- Closing the tab is safe — the workspace is saved continuously and restored on reload.
-- Clearing site data deletes it. Export a project file before you clear anything.
-- Two canvassers on two phones have two separate workspaces. Give each one their own turf,
-  then merge by exporting each device's `.xlsx` at the end of the shift.
+- Closing the app is safe — everything is saved as you go and restored when you come back.
+- Clearing site data (or uninstalling the app) deletes it. Export a project file first.
+- Two canvassers on two phones have two separate workspaces. Give each their own turf and merge by
+  exporting each phone's `.xlsx` at the end of the shift.
 
-Real-time multi-device sync needs a backend, which this deliberately doesn't have.
+Live multi-device sync needs a backend, which this deliberately doesn't have.
 
 ## Stack
 
-React + TypeScript + Vite, Leaflet with marker clustering, SheetJS for spreadsheets
-(loaded on demand), Zustand for state, idb-keyval for storage. Map tiles from CARTO,
-OpenStreetMap and Esri; no API keys required for anything except the optional Mapbox
-geocoder.
+React + TypeScript + Vite, Leaflet with marker clustering, Capacitor for the Android wrapper,
+SheetJS for spreadsheets (loaded on demand), Zustand for state, idb-keyval for storage. Map tiles
+from OpenStreetMap and Esri. No API keys needed except the optional Mapbox geocoder.
 
 ```
 src/
-  components/   MapView, ImportWizard, DoorList, HouseholdPanel, TurfTab, TeamTab, DataTab
-  lib/          parse (xlsx → households), normalize, geocode, geo, storage, export
-  state/        store (zustand), useGeocoder
+  components/  MapView, ImportWizard, DoorList, HouseholdPanel, LayersPanel, MenuPanel, TurfTab, TeamTab, DataTab
+  lib/         parse, normalize, communities, geocode, geolocation, geo, storage, export
+  state/       store (zustand), useGeocoder
+android/       Capacitor Android project
+scripts/       build-demo.mjs — one self-contained HTML file, tiles and all
 ```
 
-## Possible next steps
+## Known limits
 
-- A small sync server so a field director and their canvassers share one live list.
-- Per-canvasser walk sheets as printable PDFs for when phones die.
-- Offline tile caching for basements and rural routes.
-- Bulk actions: mark a whole street not home, reassign turf in one move.
+- No sync between devices.
+- Geocoding needs a connection; the map needs a connection for tiles unless you build the offline
+  demo page.
+- The Android build is a debug APK meant for sideloading to your own team.

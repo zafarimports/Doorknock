@@ -6,7 +6,8 @@ import 'leaflet.markercluster/dist/MarkerCluster.css';
 import 'leaflet.markercluster/dist/MarkerCluster.Default.css';
 import { STATUS_MAP, type Household } from '../types';
 import { COMMUNITY_MAP } from '../lib/communities';
-import { selectVisible, useStore } from '../state/store';
+import { useStore } from '../state/store';
+import { useVisibleHouseholds } from '../state/useVisible';
 import { initialsOf } from '../lib/normalize';
 import { getDemo } from '../lib/demo';
 import { jitter } from '../lib/geo';
@@ -27,6 +28,31 @@ const TILE_LAYERS = {
 
 export const OFFLINE_BASEMAP = 'Offline pack';
 
+interface MarkerMeta {
+  knocked?: boolean;
+  color?: string;
+}
+
+/** A cluster wears the colours of the doors inside it. */
+function clusterRing(children: L.Marker[]): string {
+  const counts = new Map<string, number>();
+  children.forEach((m) => {
+    const color = (m.options as MarkerMeta).color ?? '#64748b';
+    counts.set(color, (counts.get(color) ?? 0) + 1);
+  });
+  const total = children.length || 1;
+  let at = 0;
+  const stops = [...counts.entries()].map(([color, n]) => {
+    const from = (at / total) * 100;
+    at += n;
+    return `${color} ${from}% ${(at / total) * 100}%`;
+  });
+  return `radial-gradient(circle at center, var(--panel) 0 58%, transparent 59%), conic-gradient(${stops.join(', ')})`;
+}
+
+const escapeHtml = (value: string): string =>
+  value.replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c] ?? c);
+
 const BLANK_TILE =
   'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7';
 
@@ -46,9 +72,13 @@ function packedTileLayer(): L.TileLayer | undefined {
   }) as L.TileLayer;
 }
 
+function pinColor(h: Household, colorBy: 'community' | 'response'): string {
+  return colorBy === 'community' ? COMMUNITY_MAP[h.community].color : STATUS_MAP[h.status].color;
+}
+
 function pinIcon(h: Household, label: string, selected: boolean, colorBy: 'community' | 'response'): L.DivIcon {
   const meta = STATUS_MAP[h.status];
-  const color = colorBy === 'community' ? COMMUNITY_MAP[h.community].color : meta.color;
+  const color = pinColor(h, colorBy);
   const cls = ['pin', meta.knocked ? 'pin--knocked' : 'pin--new', selected ? 'pin--selected' : ''].join(' ');
   const check = meta.knocked
     ? '<svg class="pin__check" viewBox="0 0 24 24"><path d="M20 6 9 17l-5-5" fill="none" stroke="currentColor" stroke-width="3.5" stroke-linecap="round" stroke-linejoin="round"/></svg>'
@@ -75,7 +105,10 @@ export default function MapView() {
     markers: [],
   });
   const didFitRef = useRef(false);
+  const dataVersion = useStore((s) => s.dataVersion);
   const [fix, setFix] = useState<{ lat: number; lng: number; accuracy: number }>();
+  const retryLocationRef = useRef<() => void>();
+  const finishTurfRef = useRef<() => void>();
 
   const households = useStore((s) => s.households);
   const people = useStore((s) => s.people);
@@ -85,10 +118,10 @@ export default function MapView() {
   const mapMode = useStore((s) => s.mapMode);
   const colorBy = useStore((s) => s.settings.colorBy);
   const basemap = useStore((s) => s.settings.basemap);
-  const followMe = useStore((s) => s.settings.followMe);
+  const recenterRequest = useStore((s) => s.recenterRequest);
   const placingHouseholdId = useStore((s) => s.placingHouseholdId);
 
-  const visible = useStore(selectVisible);
+  const visible = useVisibleHouseholds();
   const labels = useMemo(() => {
     const map = new Map<string, string>();
     const byHousehold = new Map<string, string[]>();
@@ -128,16 +161,17 @@ export default function MapView() {
 
     const cluster = L.markerClusterGroup({
       chunkedLoading: true,
-      maxClusterRadius: 46,
+      maxClusterRadius: 40,
+      // walking a street, you want the individual doors, not a bubble
+      disableClusteringAtZoom: 18,
       spiderfyOnMaxZoom: true,
       showCoverageOnHover: false,
       iconCreateFunction: (cluster) => {
         const children = cluster.getAllChildMarkers();
-        const knocked = children.filter((m) => (m.options as { knocked?: boolean }).knocked).length;
-        const pct = Math.round((knocked / children.length) * 100);
+        const knocked = children.filter((m) => (m.options as MarkerMeta).knocked).length;
         return L.divIcon({
           className: 'cluster-wrap',
-          html: `<div class="cluster" style="--pct:${pct}"><span>${children.length}</span><small>${pct}%</small></div>`,
+          html: `<div class="cluster" style="background-image:${clusterRing(children)}"><span>${children.length}</span>${knocked ? `<small>✓${knocked}</small>` : ''}</div>`,
           iconSize: [46, 46],
         });
       },
@@ -203,7 +237,9 @@ export default function MapView() {
         if (existing.sig !== sig) {
           existing.marker.setLatLng([lat, lng]);
           existing.marker.setIcon(pinIcon(h, labels.get(id) ?? '', selected, colorBy));
-          (existing.marker.options as { knocked?: boolean }).knocked = STATUS_MAP[h.status].knocked;
+          const meta = existing.marker.options as MarkerMeta;
+          meta.knocked = STATUS_MAP[h.status].knocked;
+          meta.color = pinColor(h, colorBy);
           existing.sig = sig;
         }
         return;
@@ -212,6 +248,7 @@ export default function MapView() {
         icon: pinIcon(h, labels.get(id) ?? '', selected, colorBy),
         title: h.address,
         knocked: STATUS_MAP[h.status].knocked,
+        color: pinColor(h, colorBy),
         riseOnHover: true,
       } as L.MarkerOptions);
       marker.on('click', () => useStore.getState().select(id));
@@ -233,9 +270,11 @@ export default function MapView() {
     didFitRef.current = true;
   }, [households]);
 
+  // a replace-import or a loaded project goes N doors -> M doors without ever
+  // passing through zero, so the fit has to key off the data identity
   useEffect(() => {
-    if (!households.length) didFitRef.current = false;
-  }, [households.length]);
+    didFitRef.current = false;
+  }, [dataVersion]);
 
   // ---- turf polygons -------------------------------------------------------
   useEffect(() => {
@@ -254,7 +293,11 @@ export default function MapView() {
       poly.addTo(layer);
       L.marker(poly.getBounds().getCenter(), {
         interactive: false,
-        icon: L.divIcon({ className: 'turf-label-wrap', html: `<div class="turf-label" style="--turf:${t.color}">${t.name}</div>`, iconSize: [0, 0] }),
+        icon: L.divIcon({
+          className: 'turf-label-wrap',
+          html: `<div class="turf-label" style="--turf:${escapeHtml(t.color)}">${escapeHtml(t.name)}</div>`,
+          iconSize: [0, 0],
+        }),
       }).addTo(layer);
     });
   }, [turfs, filters.turfId]);
@@ -289,6 +332,7 @@ export default function MapView() {
       draftRef.current = { points: [], line: null, markers: [] };
     };
 
+    finishTurfRef.current = () => finish();
     const finish = () => {
       const draft = draftRef.current;
       if (draft.points.length >= 3) {
@@ -372,8 +416,11 @@ export default function MapView() {
     let halo: L.Circle | null = null;
     let centred = false;
     let warned = false;
+    let stop: (() => void) | undefined;
 
-    const stop = watchPosition({
+    const begin = () => {
+      stop?.();
+      stop = watchPosition({
       onFix: (position) => {
         const here = L.latLng(position.lat, position.lng);
         if (!dot) {
@@ -415,19 +462,46 @@ export default function MapView() {
         warned = true;
         useStore.getState().notify(message, 'error');
       },
-    });
+      });
+    };
+
+    begin();
+    retryLocationRef.current = () => {
+      warned = false;
+      begin();
+    };
+
+    // the native watch keeps draining battery in the background, and a user who
+    // turned location on mid-walk needs it to start working without a restart
+    const onVisibility = () => {
+      if (document.visibilityState === 'hidden') stop?.();
+      else {
+        warned = false;
+        begin();
+      }
+    };
+    document.addEventListener('visibilitychange', onVisibility);
 
     return () => {
-      stop();
+      document.removeEventListener('visibilitychange', onVisibility);
+      retryLocationRef.current = undefined;
+      stop?.();
       dot?.remove();
       halo?.remove();
     };
   }, []);
 
+  useEffect(() => {
+    if (recenterRequest > 0) recenter();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [recenterRequest]);
+
   const recenter = () => {
     const map = mapRef.current;
     if (!map) return;
     if (fix) map.setView([fix.lat, fix.lng], Math.max(map.getZoom(), 17), { animate: true });
+    // no fix yet usually means permission was refused earlier — ask again
+    else retryLocationRef.current?.();
     useStore.getState().updateSettings({ followMe: true });
   };
 
@@ -438,25 +512,32 @@ export default function MapView() {
   return (
     <div className="map-shell">
       <div ref={containerRef} className="map" />
-      <button
-        className={`map-locate ${followMe ? 'map-locate--on' : ''}`}
-        onClick={recenter}
-        title={followMe ? 'Following you' : 'Centre on me'}
-        aria-label="Centre the map on my location"
-      >
-        ◎
-      </button>
+      <div className="map-zoom">
+        <button onClick={() => mapRef.current?.zoomIn()} aria-label="Zoom in">
+          +
+        </button>
+        <button onClick={() => mapRef.current?.zoomOut()} aria-label="Zoom out">
+          −
+        </button>
+      </div>
       {mapMode !== 'browse' && (
         <div className="map-hint">
           {mapMode === 'draw-turf' ? (
             <>
-              <strong>Cutting turf</strong> — click to drop corners, double-click or press <kbd>Enter</kbd> to close it.
-              <button onClick={() => useStore.getState().setMapMode('browse')}>Cancel</button>
+              <strong>Tap the corners</strong> of the area you want, then tap Done.
+              <button className="btn btn--primary" onClick={() => finishTurfRef.current?.()}>
+                Done
+              </button>
+              <button className="btn btn--ghost" onClick={() => useStore.getState().setMapMode('browse')}>
+                Cancel
+              </button>
             </>
           ) : (
             <>
-              <strong>Placing</strong> {placing?.address ?? 'door'} — click the map where the door is.
-              <button onClick={() => useStore.getState().setMapMode('browse')}>Cancel</button>
+              <strong>Tap the map</strong> where {placing?.address ?? 'this door'} is.
+              <button className="btn btn--ghost" onClick={() => useStore.getState().setMapMode('browse')}>
+                Cancel
+              </button>
             </>
           )}
         </div>

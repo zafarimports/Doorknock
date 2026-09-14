@@ -82,7 +82,10 @@ export interface Household {
   /** the group this door belongs to, from the uploaded list or set at the door */
   community: CommunityId;
   communitySource?: CommunitySource;
+  /** first time this door was knocked */
   knockedAt?: number;
+  /** most recent visit, which is what a canvasser needs to see */
+  lastVisitAt?: number;
   knockedBy?: string;
   visits: number;
   notes: Note[];

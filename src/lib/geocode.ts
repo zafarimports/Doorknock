@@ -27,7 +27,14 @@ function queryString(h: Household, settings: Settings): string {
     .join(', ');
 }
 
-async function nominatim(h: Household, settings: Settings, signal: AbortSignal): Promise<GeocodeHit | null> {
+type Throttle = () => Promise<void>;
+
+async function nominatim(
+  h: Household,
+  settings: Settings,
+  signal: AbortSignal,
+  throttle: Throttle,
+): Promise<GeocodeHit | null> {
   const params = new URLSearchParams({
     format: 'jsonv2',
     limit: '1',
@@ -40,6 +47,7 @@ async function nominatim(h: Household, settings: Settings, signal: AbortSignal):
   if (h.region) params.set('state', h.region);
   if (settings.contactEmail) params.set('email', settings.contactEmail);
 
+  await throttle();
   const res = await fetch(`https://nominatim.openstreetmap.org/search?${params}`, {
     signal,
     headers: { Accept: 'application/json' },
@@ -56,19 +64,28 @@ async function nominatim(h: Household, settings: Settings, signal: AbortSignal):
   // abbreviations like "CRES" or missing city names.
   const fallback = new URLSearchParams({ format: 'jsonv2', limit: '1', q: queryString(h, settings) });
   if (settings.contactEmail) fallback.set('email', settings.contactEmail);
-  await sleep(NOMINATIM_DELAY);
+  await throttle();
   const res2 = await fetch(`https://nominatim.openstreetmap.org/search?${fallback}`, {
     signal,
     headers: { Accept: 'application/json' },
   });
-  if (!res2.ok) return null;
+  // a failed request is not the same as "this address does not exist" — throw so
+  // the caller retries rather than caching the address as unfindable forever
+  if (res2.status === 429) throw new Error('rate-limited');
+  if (!res2.ok) throw new Error(`geocoder returned ${res2.status}`);
   const json2 = (await res2.json()) as Array<{ lat: string; lon: string; display_name?: string; type?: string }>;
   if (!json2.length) return null;
   const hit = json2[0];
   return { lat: Number(hit.lat), lng: Number(hit.lon), label: hit.display_name, precision: hit.type ?? 'fallback' };
 }
 
-async function mapbox(h: Household, settings: Settings, signal: AbortSignal): Promise<GeocodeHit | null> {
+async function mapbox(
+  h: Household,
+  settings: Settings,
+  signal: AbortSignal,
+  throttle: Throttle,
+): Promise<GeocodeHit | null> {
+  await throttle();
   const q = encodeURIComponent(queryString(h, settings));
   const url = `https://api.mapbox.com/geocoding/v5/mapbox.places/${q}.json?limit=1&access_token=${encodeURIComponent(
     settings.mapboxToken,
@@ -95,6 +112,8 @@ export interface RunOptions {
   households: Household[];
   settings: Settings;
   signal: AbortSignal;
+  /** ignore cached misses — used by "retry the ones that failed" */
+  ignoreCachedMisses?: boolean;
   onResult: (householdId: string, hit: GeocodeHit | null) => void;
   onProgress: (p: GeocodeProgress) => void;
   onError: (message: string) => void;
@@ -108,6 +127,7 @@ export async function runGeocoder({
   households,
   settings,
   signal,
+  ignoreCachedMisses,
   onResult,
   onProgress,
   onError,
@@ -120,29 +140,41 @@ export async function runGeocoder({
   let dirty = false;
   let lastRequestAt = 0;
 
+  // every outbound request waits its turn here, so the provider's rate limit
+  // holds even when one address needs two lookups
+  const throttle = async () => {
+    const wait = lastRequestAt + delay - Date.now();
+    if (wait > 0) await sleep(wait);
+    lastRequestAt = Date.now();
+  };
+
   for (const h of households) {
     if (signal.aborted) break;
     const key = cacheKeyFor(h, settings);
     onProgress({ done, total: households.length, ok, failed, current: h.address });
 
-    if (key in cache) {
-      const cached = cache[key];
+    const cached = cache[key];
+    if (cached && key in cache) {
       onResult(h.id, cached);
-      cached ? ok++ : failed++;
+      ok++;
+      done++;
+      continue;
+    }
+    if (key in cache && !ignoreCachedMisses) {
+      onResult(h.id, null);
+      failed++;
       done++;
       continue;
     }
 
-    const wait = lastRequestAt + delay - Date.now();
-    if (wait > 0) await sleep(wait);
     if (signal.aborted) break;
-    lastRequestAt = Date.now();
 
     try {
       const hit =
         settings.geocoder === 'mapbox'
-          ? await mapbox(h, settings, signal)
-          : await nominatim(h, settings, signal);
+          ? await mapbox(h, settings, signal, throttle)
+          : await nominatim(h, settings, signal, throttle);
+      // only a definite answer goes in the cache; errors are retried next run
       cache[key] = hit;
       dirty = true;
       onResult(h.id, hit);

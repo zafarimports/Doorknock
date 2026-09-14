@@ -53,6 +53,8 @@ interface State {
   settings: Settings;
   sourceColumns: string[];
   hydrated: boolean;
+  /** bumped whenever the door set is replaced wholesale, so the map refits */
+  dataVersion: number;
 
   selectedHouseholdId?: string;
   filters: Filters;
@@ -61,6 +63,9 @@ interface State {
   geocodeProgress?: GeocodeProgress;
   geocodeRunning: boolean;
   geocodeErrors: string[];
+  geocodeAbort?: () => void;
+  /** bumped by the follow button in the top bar; the map answers it */
+  recenterRequest: number;
   toast?: { id: string; message: string; kind: 'info' | 'error' };
 
   hydrate: (state: PersistedState) => void;
@@ -76,6 +81,7 @@ interface State {
   setFilters: (patch: Partial<Filters>) => void;
   resetFilters: () => void;
   setMapMode: (mode: MapMode, householdId?: string) => void;
+  requestRecenter: () => void;
 
   setStatus: (householdId: string, status: DoorStatus, personId?: string) => void;
   toggleKnocked: (householdId: string) => void;
@@ -99,6 +105,9 @@ interface State {
 
   updateSettings: (patch: Partial<Settings>) => void;
   setGeocodeProgress: (p?: GeocodeProgress) => void;
+  /** set by useGeocoder so data changes can stop a run in flight */
+  registerGeocodeAbort: (abort?: () => void) => void;
+  abortGeocode: () => void;
   setGeocodeRunning: (running: boolean) => void;
   pushGeocodeError: (message: string) => void;
   notify: (message: string, kind?: 'info' | 'error') => void;
@@ -116,11 +125,13 @@ export const useStore = create<State>((set, get) => ({
   settings: defaultSettings,
   sourceColumns: [],
   hydrated: false,
+  dataVersion: 0,
 
   filters: emptyFilters,
   mapMode: 'browse',
   geocodeRunning: false,
   geocodeErrors: [],
+  recenterRequest: 0,
 
   hydrate: (state) =>
     set({
@@ -134,12 +145,14 @@ export const useStore = create<State>((set, get) => ({
     }),
 
   importRows: (rows, mapping, columns, opts) => {
+    get().abortGeocode();
     const { settings } = get();
     const { households, people, skipped } = buildRecords(rows, mapping, {
       groupHouseholds: settings.groupHouseholds,
       defaultRegion: undefined,
     });
     set((s) => ({
+      dataVersion: s.dataVersion + 1,
       households: opts.replace ? households : [...s.households, ...households],
       people: opts.replace ? people : [...s.people, ...people],
       sourceColumns: opts.replace ? columns : [...new Set([...s.sourceColumns, ...columns])],
@@ -151,8 +164,10 @@ export const useStore = create<State>((set, get) => ({
     return { added: households.length, skipped };
   },
 
-  loadProject: (project) =>
-    set({
+  loadProject: (project) => {
+    get().abortGeocode();
+    set((s) => ({
+      dataVersion: s.dataVersion + 1,
       households: project.households,
       people: project.people,
       turfs: project.turfs ?? [],
@@ -161,12 +176,15 @@ export const useStore = create<State>((set, get) => ({
       sourceColumns: project.sourceColumns ?? [],
       selectedHouseholdId: undefined,
       filters: emptyFilters,
-    }),
+    }));
+  },
 
   select: (id) => set({ selectedHouseholdId: id }),
   setFilters: (patch) => set((s) => ({ filters: { ...s.filters, ...patch } })),
   resetFilters: () => set({ filters: emptyFilters }),
   setMapMode: (mode, householdId) => set({ mapMode: mode, placingHouseholdId: householdId }),
+  requestRecenter: () =>
+    set((s) => ({ recenterRequest: s.recenterRequest + 1, settings: { ...s.settings, followMe: true } })),
 
   setStatus: (householdId, status, personId) =>
     set((s) => {
@@ -176,13 +194,15 @@ export const useStore = create<State>((set, get) => ({
       return {
         households: s.households.map((h) => {
           if (h.id !== householdId) return h;
-          const wasKnocked = STATUS_MAP[h.status].knocked;
+          // a door revisited on Wednesday after "not home" on Monday is two visits
+          const isNewVisit = knocked && h.status !== status;
           return {
             ...h,
             status,
             knockedAt: knocked ? h.knockedAt ?? now : undefined,
+            lastVisitAt: knocked ? now : undefined,
             knockedBy: knocked ? h.knockedBy ?? canvasser?.name : undefined,
-            visits: knocked && !wasKnocked ? h.visits + 1 : h.visits,
+            visits: isNewVisit ? h.visits + 1 : h.visits,
             updatedAt: now,
           };
         }),
@@ -200,7 +220,9 @@ export const useStore = create<State>((set, get) => ({
     if (isKnocked) {
       set((s) => ({
         households: s.households.map((x) =>
-          x.id === householdId ? { ...x, knockedAt: undefined, knockedBy: undefined, visits: Math.max(0, x.visits - 1) } : x,
+          x.id === householdId
+            ? { ...x, knockedAt: undefined, lastVisitAt: undefined, knockedBy: undefined, visits: Math.max(0, x.visits - 1) }
+            : x,
         ),
       }));
     }
@@ -274,7 +296,8 @@ export const useStore = create<State>((set, get) => ({
   applyGeocode: (householdId, hit) =>
     set((s) => ({
       households: s.households.map((h) =>
-        h.id === householdId
+        // a pin dropped by a canvasser beats anything the geocoder guesses
+        h.id === householdId && h.geocode !== 'manual'
           ? hit
             ? { ...h, lat: hit.lat, lng: hit.lng, geocode: 'ok', geocodeLabel: hit.label, geocodePrecision: hit.precision }
             : { ...h, geocode: 'failed' }
@@ -340,13 +363,20 @@ export const useStore = create<State>((set, get) => ({
 
   updateSettings: (patch) => set((s) => ({ settings: { ...s.settings, ...patch } })),
   setGeocodeProgress: (p) => set({ geocodeProgress: p }),
+  registerGeocodeAbort: (abort) => set({ geocodeAbort: abort }),
+  abortGeocode: () => {
+    get().geocodeAbort?.();
+    set({ geocodeAbort: undefined, geocodeRunning: false, geocodeProgress: undefined });
+  },
   setGeocodeRunning: (running) => set({ geocodeRunning: running, geocodeErrors: running ? [] : get().geocodeErrors }),
   pushGeocodeError: (message) => set((s) => ({ geocodeErrors: [message, ...s.geocodeErrors].slice(0, 50) })),
   notify: (message, kind = 'info') => set({ toast: { id: uid('toast'), message, kind } }),
   dismissToast: () => set({ toast: undefined }),
 
-  clearAll: () =>
-    set({
+  clearAll: () => {
+    get().abortGeocode();
+    set((s) => ({
+      dataVersion: s.dataVersion + 1,
       households: [],
       people: [],
       turfs: [],
@@ -355,7 +385,8 @@ export const useStore = create<State>((set, get) => ({
       filters: emptyFilters,
       geocodeProgress: undefined,
       geocodeErrors: [],
-    }),
+    }));
+  },
 }));
 
 /** Households passing the current filter set, with their residents attached. */

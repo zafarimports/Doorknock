@@ -76,10 +76,15 @@ export function displayAddress(address: string, unit?: string): string {
   return unit ? `${a}, Unit ${unit}` : a;
 }
 
+/**
+ * Order matters: fields are claimed in this order, so the specific name columns
+ * get first refusal — otherwise "First Name" is swallowed by the catch-all
+ * "name" field and every surname is dropped.
+ */
 const HEADER_HINTS: Record<keyof ColumnMapping, string[]> = {
-  name: ['name', 'full name', 'voter', 'elector', 'resident', 'contact'],
   firstName: ['first name', 'firstname', 'first', 'given name', 'givenname', 'fname'],
   lastName: ['last name', 'lastname', 'last', 'surname', 'family name', 'lname'],
+  name: ['full name', 'name', 'voter', 'elector', 'resident', 'contact'],
   address: ['property address', 'address', 'street address', 'street', 'addr', 'residence'],
   unit: ['unit', 'apt', 'apartment', 'suite'],
   city: ['city', 'town', 'municipality'],
@@ -102,10 +107,13 @@ export function guessMapping(headers: string[]): ColumnMapping {
 
   (Object.keys(HEADER_HINTS) as (keyof ColumnMapping)[]).forEach((field) => {
     const hints = HEADER_HINTS[field];
+    // "First Name" belongs to firstName even though it contains the word "name"
+    const splitNameColumn = field === 'name';
     let bestIdx = -1;
     let bestScore = 0;
     norm.forEach((h, i) => {
       if (!h || used.has(headers[i])) return;
+      if (splitNameColumn && /\b(first|last|given|sur|family|middle)\b/.test(h)) return;
       let score = 0;
       hints.forEach((hint, rank) => {
         const weight = hints.length - rank;
