@@ -16,6 +16,7 @@ const FIELDS: { key: keyof ColumnMapping; label: string; hint?: string; required
   { key: 'region', label: 'Province / state' },
   { key: 'poll', label: 'Poll / ward' },
   { key: 'occupancy', label: 'Occupancy', hint: 'Owner, Tenant, Spouse…' },
+  { key: 'community', label: 'Community / group', hint: 'Muslim, Sikh, Hindu… colours the map' },
   { key: 'phone', label: 'Phone' },
   { key: 'email', label: 'Email' },
   { key: 'lat', label: 'Latitude', hint: 'skips geocoding when present' },

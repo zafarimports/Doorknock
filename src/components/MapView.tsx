@@ -1,14 +1,16 @@
-import { useEffect, useMemo, useRef } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
 import 'leaflet.markercluster';
 import 'leaflet.markercluster/dist/MarkerCluster.css';
 import 'leaflet.markercluster/dist/MarkerCluster.Default.css';
 import { STATUS_MAP, type Household } from '../types';
+import { COMMUNITY_MAP } from '../lib/communities';
 import { selectVisible, useStore } from '../state/store';
 import { initialsOf } from '../lib/normalize';
 import { getDemo } from '../lib/demo';
 import { jitter } from '../lib/geo';
+import { watchPosition } from '../lib/geolocation';
 
 const TILE_LAYERS = {
   Streets: {
@@ -22,6 +24,8 @@ const TILE_LAYERS = {
     maxZoom: 19,
   },
 } as const;
+
+export const OFFLINE_BASEMAP = 'Offline pack';
 
 const BLANK_TILE =
   'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7';
@@ -42,15 +46,16 @@ function packedTileLayer(): L.TileLayer | undefined {
   }) as L.TileLayer;
 }
 
-function pinIcon(h: Household, label: string, selected: boolean): L.DivIcon {
+function pinIcon(h: Household, label: string, selected: boolean, colorBy: 'community' | 'response'): L.DivIcon {
   const meta = STATUS_MAP[h.status];
+  const color = colorBy === 'community' ? COMMUNITY_MAP[h.community].color : meta.color;
   const cls = ['pin', meta.knocked ? 'pin--knocked' : 'pin--new', selected ? 'pin--selected' : ''].join(' ');
   const check = meta.knocked
     ? '<svg class="pin__check" viewBox="0 0 24 24"><path d="M20 6 9 17l-5-5" fill="none" stroke="currentColor" stroke-width="3.5" stroke-linecap="round" stroke-linejoin="round"/></svg>'
     : `<span class="pin__label">${label}</span>`;
   return L.divIcon({
     className: 'pin-wrap',
-    html: `<div class="${cls}" style="--pin:${meta.color}"><div class="pin__body">${check}</div><div class="pin__stem"></div></div>`,
+    html: `<div class="${cls}" style="--pin:${color}"><div class="pin__body">${check}</div><div class="pin__stem"></div></div>`,
     iconSize: [30, 40],
     iconAnchor: [15, 38],
     popupAnchor: [0, -34],
@@ -63,12 +68,14 @@ export default function MapView() {
   const clusterRef = useRef<L.MarkerClusterGroup | null>(null);
   const markersRef = useRef(new Map<string, { marker: L.Marker; sig: string }>());
   const turfLayerRef = useRef<L.LayerGroup | null>(null);
+  const baseLayersRef = useRef<Record<string, L.TileLayer>>({});
   const draftRef = useRef<{ points: L.LatLng[]; line: L.Polyline | null; markers: L.CircleMarker[] }>({
     points: [],
     line: null,
     markers: [],
   });
   const didFitRef = useRef(false);
+  const [fix, setFix] = useState<{ lat: number; lng: number; accuracy: number }>();
 
   const households = useStore((s) => s.households);
   const people = useStore((s) => s.people);
@@ -76,6 +83,9 @@ export default function MapView() {
   const filters = useStore((s) => s.filters);
   const selectedId = useStore((s) => s.selectedHouseholdId);
   const mapMode = useStore((s) => s.mapMode);
+  const colorBy = useStore((s) => s.settings.colorBy);
+  const basemap = useStore((s) => s.settings.basemap);
+  const followMe = useStore((s) => s.settings.followMe);
   const placingHouseholdId = useStore((s) => s.placingHouseholdId);
 
   const visible = useStore(selectVisible);
@@ -100,6 +110,9 @@ export default function MapView() {
     const map = L.map(containerRef.current, {
       center: [43.3616, -80.3144],
       zoom: 12,
+      // clustering needs a max zoom before any tile layer is attached
+      maxZoom: 19,
+      minZoom: 3,
       zoomControl: false,
       preferCanvas: true,
     });
@@ -107,10 +120,10 @@ export default function MapView() {
       Object.entries(TILE_LAYERS).map(([name, cfg]) => [name, L.tileLayer(cfg.url, cfg)]),
     ) as Record<string, L.TileLayer>;
     const packed = packedTileLayer();
-    if (packed) layers['Offline pack'] = packed;
-    (packed ?? layers.Streets).addTo(map);
-    L.control.layers(layers, undefined, { position: 'topright' }).addTo(map);
-    L.control.zoom({ position: 'topright' }).addTo(map);
+    if (packed) layers[OFFLINE_BASEMAP] = packed;
+    baseLayersRef.current = layers;
+    // no zoom buttons: pinch and double-tap cover it, and they collided with
+    // the app's own controls on a phone
     L.control.scale({ position: 'bottomleft', imperial: false }).addTo(map);
 
     const cluster = L.markerClusterGroup({
@@ -142,6 +155,19 @@ export default function MapView() {
     };
   }, []);
 
+  // ---- basemap -------------------------------------------------------------
+  useEffect(() => {
+    const map = mapRef.current;
+    const layers = baseLayersRef.current;
+    if (!map || !Object.keys(layers).length) return;
+    const wanted = layers[basemap] ?? layers[OFFLINE_BASEMAP] ?? layers.Streets;
+    Object.values(layers).forEach((layer) => {
+      if (layer !== wanted && map.hasLayer(layer)) map.removeLayer(layer);
+    });
+    if (!map.hasLayer(wanted)) wanted.addTo(map);
+    wanted.bringToBack();
+  }, [basemap]);
+
   // ---- markers -------------------------------------------------------------
   useEffect(() => {
     const cluster = clusterRef.current;
@@ -171,19 +197,19 @@ export default function MapView() {
       seenAtPoint.set(key, seen + 1);
       const [lat, lng] = jitter(h.lat!, h.lng!, seen);
       const selected = id === selectedId;
-      const sig = `${h.status}|${selected}|${lat}|${lng}|${labels.get(id)}`;
+      const sig = `${h.status}|${h.community}|${colorBy}|${selected}|${lat}|${lng}|${labels.get(id)}`;
       const existing = registry.get(id);
       if (existing) {
         if (existing.sig !== sig) {
           existing.marker.setLatLng([lat, lng]);
-          existing.marker.setIcon(pinIcon(h, labels.get(id) ?? '', selected));
+          existing.marker.setIcon(pinIcon(h, labels.get(id) ?? '', selected, colorBy));
           (existing.marker.options as { knocked?: boolean }).knocked = STATUS_MAP[h.status].knocked;
           existing.sig = sig;
         }
         return;
       }
       const marker = L.marker([lat, lng], {
-        icon: pinIcon(h, labels.get(id) ?? '', selected),
+        icon: pinIcon(h, labels.get(id) ?? '', selected, colorBy),
         title: h.address,
         knocked: STATUS_MAP[h.status].knocked,
         riseOnHover: true,
@@ -195,7 +221,7 @@ export default function MapView() {
 
     if (toRemove.length) cluster.removeLayers(toRemove);
     if (toAdd.length) cluster.addLayers(toAdd);
-  }, [visible, selectedId, labels]);
+  }, [visible, selectedId, labels, colorBy]);
 
   // ---- fit to data once we have something to show --------------------------
   useEffect(() => {
@@ -311,10 +337,16 @@ export default function MapView() {
       }
     };
 
+    const onDragStart = () => {
+      if (useStore.getState().settings.followMe) useStore.getState().updateSettings({ followMe: false });
+    };
+
+    map.on('dragstart', onDragStart);
     map.on('click', onClick);
     map.on('dblclick', onDblClick);
     window.addEventListener('keydown', onKey);
     return () => {
+      map.off('dragstart', onDragStart);
       map.off('click', onClick);
       map.off('dblclick', onDblClick);
       window.removeEventListener('keydown', onKey);
@@ -331,16 +363,72 @@ export default function MapView() {
     else map.doubleClickZoom.enable();
   }, [mapMode]);
 
-  const locate = () => {
+  // ---- live position while walking ---------------------------------------
+  useEffect(() => {
     const map = mapRef.current;
     if (!map) return;
-    map.locate({ setView: true, maxZoom: 17 });
-    map.once('locationfound', (e: L.LocationEvent) => {
-      L.circleMarker(e.latlng, { radius: 8, color: '#38bdf8', fillColor: '#38bdf8', fillOpacity: 0.6 })
-        .addTo(map)
-        .bindTooltip('You are here');
+
+    let dot: L.Marker | null = null;
+    let halo: L.Circle | null = null;
+    let centred = false;
+    let warned = false;
+
+    const stop = watchPosition({
+      onFix: (position) => {
+        const here = L.latLng(position.lat, position.lng);
+        if (!dot) {
+          dot = L.marker(here, {
+            zIndexOffset: 1000,
+            interactive: false,
+            icon: L.divIcon({ className: 'me-wrap', html: '<div class="me"><span class="me__beam"></span></div>', iconSize: [22, 22] }),
+          }).addTo(map);
+          halo = L.circle(here, {
+            radius: position.accuracy,
+            color: '#38bdf8',
+            weight: 1,
+            fillColor: '#38bdf8',
+            fillOpacity: 0.12,
+            interactive: false,
+          }).addTo(map);
+        } else {
+          dot.setLatLng(here);
+          halo?.setLatLng(here);
+          halo?.setRadius(position.accuracy);
+        }
+
+        const el = dot.getElement()?.querySelector('.me') as HTMLElement | null;
+        if (el) {
+          el.style.setProperty('--heading', position.heading === undefined ? '0deg' : `${position.heading}deg`);
+          el.classList.toggle('me--heading', position.heading !== undefined);
+        }
+
+        setFix(position);
+        const { settings, mapMode, households } = useStore.getState();
+        if (!centred && !households.some((h) => h.lat !== undefined)) {
+          map.setView(here, 16);
+          centred = true;
+        }
+        if (settings.followMe && mapMode === 'browse') map.panTo(here, { animate: true, duration: 0.6 });
+      },
+      onError: (message) => {
+        if (warned) return;
+        warned = true;
+        useStore.getState().notify(message, 'error');
+      },
     });
-    map.once('locationerror', () => useStore.getState().notify('Could not get your location', 'error'));
+
+    return () => {
+      stop();
+      dot?.remove();
+      halo?.remove();
+    };
+  }, []);
+
+  const recenter = () => {
+    const map = mapRef.current;
+    if (!map) return;
+    if (fix) map.setView([fix.lat, fix.lng], Math.max(map.getZoom(), 17), { animate: true });
+    useStore.getState().updateSettings({ followMe: true });
   };
 
   const placing = placingHouseholdId
@@ -350,7 +438,12 @@ export default function MapView() {
   return (
     <div className="map-shell">
       <div ref={containerRef} className="map" />
-      <button className="map-locate" onClick={locate} title="Find my location">
+      <button
+        className={`map-locate ${followMe ? 'map-locate--on' : ''}`}
+        onClick={recenter}
+        title={followMe ? 'Following you' : 'Centre on me'}
+        aria-label="Centre the map on my location"
+      >
         ◎
       </button>
       {mapMode !== 'browse' && (

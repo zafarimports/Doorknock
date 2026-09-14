@@ -1,4 +1,5 @@
 import type { ColumnMapping, Household, Person } from '../types';
+import { normalizeCommunity, type CommunityId } from './communities';
 import {
   clean,
   displayAddress,
@@ -116,6 +117,7 @@ export function buildRecords(
       const hasCoords = Number.isFinite(lat) && Number.isFinite(lng) && lat !== 0 && lng !== 0;
       household = {
         id: uid('hh'),
+        community: 'unknown',
         address: displayAddress(street),
         unit: unit || undefined,
         city: city ? titleCase(city) : undefined,
@@ -143,9 +145,17 @@ export function buildRecords(
     const first = pick('firstName') ? titleCase(pick('firstName')) : parsed.first;
     const last = pick('lastName') ? titleCase(pick('lastName')) : parsed.last;
 
+    const community: CommunityId | undefined = normalizeCommunity(pick('community'));
+    if (community && household.community === 'unknown') {
+      household.community = community;
+      household.communitySource = 'file';
+    }
+
     people.push({
       id: uid('p'),
       householdId: household.id,
+      community,
+      communitySource: community ? 'file' : undefined,
       name: parsed.display || [first, last].filter(Boolean).join(' ') || 'Unnamed resident',
       firstName: first || undefined,
       lastName: last || undefined,

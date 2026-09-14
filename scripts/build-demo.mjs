@@ -33,7 +33,7 @@ await build({
 const js = await readFile(path.join(outDir, 'app.js'), 'utf8');
 const css = await readFile(path.join(outDir, 'app.css'), 'utf8');
 
-const csv = await readFile(path.join(root, 'sample-data', 'sample-walk-list.csv'), 'utf8');
+const csv = await readFile(path.join(root, 'sample-data', 'placeholder-list.csv'), 'utf8');
 const tilesPath = process.env.DEMO_TILES;
 let tiles;
 if (tilesPath && existsSync(tilesPath)) tiles = JSON.parse(await readFile(tilesPath, 'utf8'));
@@ -42,7 +42,7 @@ const payload = {
   csv,
   tiles,
   maxNativeZoom: Number(process.env.DEMO_MAX_ZOOM ?? 16),
-  note: 'Demo list loaded — click any pin to knock the door.',
+  note: 'Placeholder list loaded — tap any pin to knock the door.',
 };
 
 const fragment = `<title>Doorknock</title>

@@ -91,6 +91,7 @@ const HEADER_HINTS: Record<keyof ColumnMapping, string[]> = {
   email: ['email', 'e-mail', 'mail'],
   lat: ['lat', 'latitude', 'y'],
   lng: ['lng', 'lon', 'long', 'longitude', 'x'],
+  community: ['community', 'group', 'religion', 'ethnicity', 'demographic', 'segment', 'background'],
 };
 
 /** Best-effort auto mapping of spreadsheet headers onto our fields. */
@@ -110,7 +111,8 @@ export function guessMapping(headers: string[]): ColumnMapping {
         const weight = hints.length - rank;
         if (h === hint) score = Math.max(score, 100 + weight);
         else if (h.replace(/[^a-z]/g, '') === hint.replace(/[^a-z]/g, '')) score = Math.max(score, 90 + weight);
-        else if (h.includes(hint)) score = Math.max(score, 50 + weight);
+        // whole words only, so "community" is not read as a "unit" column
+        else if (new RegExp(`\\b${hint.replace(/[^a-z0-9 ]/g, '.')}\\b`).test(h)) score = Math.max(score, 50 + weight);
       });
       if (score > bestScore) {
         bestScore = score;

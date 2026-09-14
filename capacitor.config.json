@@ -1,0 +1,11 @@
+{
+  "appId": "app.doorknock.canvass",
+  "appName": "Doorknock",
+  "webDir": "dist",
+  "android": {
+    "allowMixedContent": false
+  },
+  "server": {
+    "androidScheme": "https"
+  }
+}

@@ -15,6 +15,7 @@ import { uid } from '../lib/normalize';
 import type { GeocodeProgress } from '../lib/geocode';
 import { buildRecords } from '../lib/parse';
 import { pointInPolygon } from '../lib/geo';
+import type { CommunityId } from '../lib/communities';
 import type { PersistedState } from '../lib/storage';
 
 export const TURF_COLORS = ['#f97316', '#22d3ee', '#a78bfa', '#f472b6', '#84cc16', '#facc15', '#60a5fa', '#fb7185'];
@@ -22,6 +23,8 @@ export const TURF_COLORS = ['#f97316', '#22d3ee', '#a78bfa', '#f472b6', '#84cc16
 export interface Filters {
   search: string;
   statuses: DoorStatus[];
+  /** groups switched off in the layer control */
+  hiddenCommunities: CommunityId[];
   turfId?: string;
   poll?: string;
   city?: string;
@@ -37,6 +40,9 @@ export const defaultSettings: Settings = {
   geocoder: 'nominatim',
   mapboxToken: '',
   groupHouseholds: true,
+  colorBy: 'community',
+  followMe: true,
+  basemap: 'Streets',
 };
 
 interface State {
@@ -76,6 +82,8 @@ interface State {
   addNote: (householdId: string, text: string) => void;
   deleteNote: (householdId: string, noteId: string) => void;
   toggleTag: (householdId: string, tag: string) => void;
+  setCommunity: (householdId: string, community: CommunityId) => void;
+  toggleCommunityLayer: (community: CommunityId) => void;
   updatePerson: (personId: string, patch: Partial<Person>) => void;
   moveHousehold: (householdId: string, lat: number, lng: number) => void;
   applyGeocode: (householdId: string, hit: { lat: number; lng: number; label?: string; precision?: string } | null) => void;
@@ -98,7 +106,7 @@ interface State {
   clearAll: () => void;
 }
 
-const emptyFilters: Filters = { search: '', statuses: [], unknockedOnly: false };
+const emptyFilters: Filters = { search: '', statuses: [], hiddenCommunities: [], unknockedOnly: false };
 
 export const useStore = create<State>((set, get) => ({
   households: [],
@@ -229,6 +237,26 @@ export const useStore = create<State>((set, get) => ({
       ),
     })),
 
+  setCommunity: (householdId, community) =>
+    set((s) => ({
+      households: s.households.map((h) =>
+        h.id === householdId ? { ...h, community, communitySource: 'manual', updatedAt: Date.now() } : h,
+      ),
+      people: s.people.map((p) =>
+        p.householdId === householdId ? { ...p, community, communitySource: 'manual' } : p,
+      ),
+    })),
+
+  toggleCommunityLayer: (community) =>
+    set((s) => ({
+      filters: {
+        ...s.filters,
+        hiddenCommunities: s.filters.hiddenCommunities.includes(community)
+          ? s.filters.hiddenCommunities.filter((c) => c !== community)
+          : [...s.filters.hiddenCommunities, community],
+      },
+    })),
+
   updatePerson: (personId, patch) =>
     set((s) => ({ people: s.people.map((p) => (p.id === personId ? { ...p, ...patch } : p)) })),
 
@@ -343,6 +371,7 @@ export function selectVisible(state: State): Household[] {
   const turfById = new Map(state.turfs.map((t) => [t.id, t]));
 
   return households.filter((h) => {
+    if (filters.hiddenCommunities.includes(h.community)) return false;
     if (filters.statuses.length && !filters.statuses.includes(h.status)) return false;
     if (filters.unknockedOnly && STATUS_MAP[h.status].knocked) return false;
     if (filters.turfId && h.turfId !== filters.turfId) return false;

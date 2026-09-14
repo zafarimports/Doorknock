@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">Doorknock</string>
+    <string name="title_activity_main">Doorknock</string>
+    <string name="package_name">app.doorknock.canvass</string>
+    <string name="custom_url_scheme">app.doorknock.canvass</string>
+</resources>

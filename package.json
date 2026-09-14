@@ -12,6 +12,8 @@
     "build:demo": "node scripts/build-demo.mjs"
   },
   "dependencies": {
+    "@capacitor/core": "^6.2.2",
+    "@capacitor/geolocation": "^6.1.1",
     "idb-keyval": "^6.2.1",
     "leaflet": "^1.9.4",
     "leaflet.markercluster": "^1.5.3",
@@ -21,6 +23,8 @@
     "zustand": "^4.5.5"
   },
   "devDependencies": {
+    "@capacitor/android": "^6.2.2",
+    "@capacitor/cli": "^6.2.2",
     "@types/geojson": "^7946.0.14",
     "@types/leaflet": "^1.9.12",
     "@types/leaflet.markercluster": "^1.5.4",

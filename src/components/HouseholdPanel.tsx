@@ -2,6 +2,10 @@ import { useEffect, useMemo, useState } from 'react';
 import { STATUSES, STATUS_MAP, type DoorStatus } from '../types';
 import { peopleOf, useStore } from '../state/store';
 import { displayAddress } from '../lib/normalize';
+import { COMMUNITIES, COMMUNITY_MAP } from '../lib/communities';
+
+/** The four responses a canvasser needs at almost every door. */
+const PRIMARY: DoorStatus[] = ['support', 'not_home', 'undecided', 'oppose'];
 
 const QUICK_TAGS = ['Sign requested', 'Volunteer', 'Needs ride', 'Language help', 'Dog', 'Follow up', 'Moved'];
 
@@ -22,11 +26,13 @@ export default function HouseholdPanel() {
   const [note, setNote] = useState('');
   const [showRaw, setShowRaw] = useState(false);
   const [editing, setEditing] = useState<string>();
+  const [allResponses, setAllResponses] = useState(false);
 
   useEffect(() => {
     setNote('');
     setShowRaw(false);
     setEditing(undefined);
+    setAllResponses(false);
   }, [id]);
 
   const knocked = household ? STATUS_MAP[household.status].knocked : false;
@@ -65,7 +71,7 @@ export default function HouseholdPanel() {
       <section className="door-panel__section">
         <h3>Response</h3>
         <div className="status-grid">
-          {STATUSES.map((s) => (
+          {STATUSES.filter((s) => (allResponses ? true : PRIMARY.includes(s.id))).map((s) => (
             <button
               key={s.id}
               className={`status-chip ${household.status === s.id ? 'status-chip--on' : ''}`}
@@ -76,6 +82,32 @@ export default function HouseholdPanel() {
             </button>
           ))}
         </div>
+        <button className="link-btn" onClick={() => setAllResponses((v) => !v)}>
+          {allResponses ? 'Fewer options' : 'More options'}
+        </button>
+      </section>
+
+      <section className="door-panel__section">
+        <h3>Community</h3>
+        <div className="tag-row">
+          {COMMUNITIES.filter((c) => c.id !== 'unknown').map((c) => (
+            <button
+              key={c.id}
+              className={`community-chip ${household.community === c.id ? 'community-chip--on' : ''}`}
+              style={{ '--chip': c.color } as React.CSSProperties}
+              onClick={() => useStore.getState().setCommunity(household.id, household.community === c.id ? 'unknown' : c.id)}
+            >
+              {c.label}
+            </button>
+          ))}
+        </div>
+        <p className="muted small">
+          {household.communitySource === 'file'
+            ? `From your list · ${COMMUNITY_MAP[household.community].label}`
+            : household.communitySource === 'manual'
+              ? 'Set here at the door'
+              : 'Not classified — tap a group to set it'}
+        </p>
       </section>
 
       <section className="door-panel__section">

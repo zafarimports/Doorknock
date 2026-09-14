@@ -1,7 +1,7 @@
 import { get, set, del } from 'idb-keyval';
 import type { Canvasser, Household, Person, Settings, Turf } from '../types';
 
-const KEY = 'doorknock:project:v1';
+const KEY = 'doorknock:project:v2';
 const GEO_KEY = 'doorknock:geocache:v1';
 
 export interface PersistedState {

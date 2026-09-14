@@ -1,3 +1,5 @@
+import type { CommunityId, CommunitySource } from './lib/communities';
+
 export type DoorStatus =
   | 'not_started'
   | 'strong_support'
@@ -50,6 +52,8 @@ export interface Person {
   email?: string;
   /** per-person disposition; falls back to the household status */
   status?: DoorStatus;
+  community?: CommunityId;
+  communitySource?: CommunitySource;
   /** every column of the original row, verbatim */
   raw: Record<string, string>;
 }
@@ -75,6 +79,9 @@ export interface Household {
   geocodeLabel?: string;
   geocodePrecision?: string;
   status: DoorStatus;
+  /** the group this door belongs to, from the uploaded list or set at the door */
+  community: CommunityId;
+  communitySource?: CommunitySource;
   knockedAt?: number;
   knockedBy?: string;
   visits: number;
@@ -119,6 +126,7 @@ export interface ColumnMapping {
   email?: string;
   lat?: string;
   lng?: string;
+  community?: string;
 }
 
 export interface Settings {
@@ -130,6 +138,11 @@ export interface Settings {
   /** who is knocking right now — stamped onto notes and knocks */
   activeCanvasserId?: string;
   groupHouseholds: boolean;
+  /** what the pin colour means on the map */
+  colorBy: 'community' | 'response';
+  /** keep the GPS following while walking a turf */
+  followMe: boolean;
+  basemap: string;
 }
 
 export interface ProjectFile {

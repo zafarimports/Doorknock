@@ -1,24 +1,32 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import MapView from './components/MapView';
-import Sidebar, { type TabId } from './components/Sidebar';
+import MenuPanel, { type MenuSection } from './components/MenuPanel';
+import LayersPanel from './components/LayersPanel';
 import HouseholdPanel from './components/HouseholdPanel';
 import ImportWizard from './components/ImportWizard';
-import { useStore } from './state/store';
+import { selectVisible, useStore } from './state/store';
 import { loadState, saveState } from './lib/storage';
 import { getDemo } from './lib/demo';
 import { readWorkbook } from './lib/parse';
 import { guessMapping } from './lib/normalize';
+import { STATUS_MAP } from './types';
 
 export default function App() {
   const hydrated = useStore((s) => s.hydrated);
   const households = useStore((s) => s.households);
   const selectedId = useStore((s) => s.selectedHouseholdId);
-  const activeCanvasser = useStore((s) => s.canvassers.find((c) => c.id === s.settings.activeCanvasserId));
   const toast = useStore((s) => s.toast);
+  const visible = useStore(selectVisible);
+
   const [showImport, setShowImport] = useState(false);
-  const [tab, setTab] = useState<TabId>('doors');
-  const [sidebarOpen, setSidebarOpen] = useState(true);
+  const [menu, setMenu] = useState<MenuSection>();
+  const [layersOpen, setLayersOpen] = useState(false);
   const saveTimer = useRef<number>();
+
+  const progress = useMemo(() => {
+    const knocked = visible.filter((h) => STATUS_MAP[h.status].knocked).length;
+    return { knocked, total: visible.length, pct: visible.length ? Math.round((knocked / visible.length) * 100) : 0 };
+  }, [visible]);
 
   // restore the workspace from IndexedDB on first paint
   useEffect(() => {
@@ -33,7 +41,7 @@ export default function App() {
           sourceColumns: [],
         },
       );
-      // the demo build ships a starter list so the map is never empty on arrival
+      // a demo build ships a starter list so the map is never empty on arrival
       const demo = getDemo();
       if (demo?.csv && !useStore.getState().households.length) {
         const sheets = await readWorkbook(new File([demo.csv], 'demo.csv', { type: 'text/csv' }));
@@ -64,7 +72,7 @@ export default function App() {
       window.clearTimeout(saveTimer.current);
       void saveState(snapshot());
     };
-    // canvassers close the tab seconds after a knock — never lose that write
+    // canvassers lock the phone seconds after a knock — never lose that write
     const onHide = () => {
       if (document.visibilityState === 'hidden') flush();
     };
@@ -87,56 +95,58 @@ export default function App() {
     return () => window.clearTimeout(t);
   }, [toast]);
 
+  // opening a door should get the panels out of the way
+  useEffect(() => {
+    if (selectedId) {
+      setMenu(undefined);
+      setLayersOpen(false);
+    }
+  }, [selectedId]);
+
   const empty = hydrated && households.length === 0;
 
   return (
-    <div className={`app ${sidebarOpen ? '' : 'app--collapsed'} ${selectedId ? 'app--detail' : ''}`}>
+    <div className="app">
       <header className="topbar">
-        <button className="topbar__toggle" onClick={() => setSidebarOpen((v) => !v)} aria-label="Toggle sidebar">
+        <button className="topbar__btn" onClick={() => setMenu(menu ? undefined : 'doors')} aria-label="Menu">
           ☰
         </button>
-        <div className="brand">
-          <span className="brand__mark">◈</span>
-          <span>Doorknock</span>
-        </div>
-        <div className="topbar__spacer" />
-        {activeCanvasser && (
-          <span className="who" style={{ '--turf': activeCanvasser.color } as React.CSSProperties}>
-            {activeCanvasser.name}
+        <div className="topbar__progress" onClick={() => setMenu('doors')} role="button" tabIndex={0}>
+          <strong>
+            {progress.knocked}
+            <span className="muted">/{progress.total}</span>
+          </strong>
+          <span className="topbar__bar">
+            <span style={{ width: `${progress.pct}%` }} />
           </span>
-        )}
-        <button className="btn btn--ghost" onClick={() => useStore.getState().setMapMode('draw-turf')}>
-          Cut turf
-        </button>
-        <button className="btn btn--primary" onClick={() => setShowImport(true)}>
-          Upload list
+          <span className="muted small">knocked</span>
+        </div>
+        <button className="topbar__btn" onClick={() => setLayersOpen((v) => !v)} aria-label="Layers">
+          ◍
         </button>
       </header>
 
       <main className="workspace">
-        <Sidebar tab={tab} onTab={setTab} onOpenImport={() => setShowImport(true)} />
         <div className="map-area">
           <MapView />
           {empty && (
             <div className="empty">
               <div className="empty__card">
-                <h1>Put your list on the map</h1>
+                <h1>Load your list</h1>
                 <p>
-                  Upload a spreadsheet of people — names, street addresses, city, postal code — and every door
-                  becomes a pin you can knock, tag and take notes on.
+                  A spreadsheet with names and street addresses becomes a map of doors you can knock, colour by
+                  community and take notes on.
                 </p>
                 <button className="btn btn--primary btn--lg" onClick={() => setShowImport(true)}>
-                  Upload a spreadsheet
+                  Upload spreadsheet
                 </button>
-                <ol className="empty__steps">
-                  <li>Upload .xlsx or .csv and confirm the columns</li>
-                  <li>Geocode the addresses into pins</li>
-                  <li>Cut turf, assign canvassers, start knocking</li>
-                </ol>
               </div>
             </div>
           )}
         </div>
+
+        {menu && <MenuPanel initial={menu} onClose={() => setMenu(undefined)} onOpenImport={() => setShowImport(true)} />}
+        {layersOpen && <LayersPanel onClose={() => setLayersOpen(false)} />}
         <HouseholdPanel />
       </main>
 
@@ -145,13 +155,16 @@ export default function App() {
           onClose={() => setShowImport(false)}
           onImported={() => {
             setShowImport(false);
-            setTab('data');
+            setMenu('data');
           }}
         />
       )}
 
       {toast && (
-        <div className={`toast ${toast.kind === 'error' ? 'toast--error' : ''}`} onClick={() => useStore.getState().dismissToast()}>
+        <div
+          className={`toast ${toast.kind === 'error' ? 'toast--error' : ''}`}
+          onClick={() => useStore.getState().dismissToast()}
+        >
           {toast.message}
         </div>
       )}
