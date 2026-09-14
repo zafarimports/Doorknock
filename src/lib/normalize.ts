@@ -72,7 +72,8 @@ export function householdKey(address: string, unit: string, city: string, postal
 }
 
 export function displayAddress(address: string, unit?: string): string {
-  const a = titleCase(address);
+  // 96A Blenheim Rd, not 96a Blenheim Rd
+  const a = titleCase(address).replace(/^(\d+)([a-z])\b/, (_m, n: string, letter: string) => n + letter.toUpperCase());
   return unit ? `${a}, Unit ${unit}` : a;
 }
 
@@ -84,8 +85,10 @@ export function displayAddress(address: string, unit?: string): string {
 const HEADER_HINTS: Record<keyof ColumnMapping, string[]> = {
   firstName: ['first name', 'firstname', 'first', 'given name', 'givenname', 'fname'],
   lastName: ['last name', 'lastname', 'last', 'surname', 'family name', 'lname'],
+  streetNumber: ['street #', 'street number', 'house number', 'house #', 'civic number', 'st #'],
+  streetSuffix: ['street # suffix', 'number suffix', 'suffix'],
+  address: ['street name', 'property address', 'address', 'street address', 'street', 'addr', 'residence'],
   name: ['full name', 'name', 'voter', 'elector', 'resident', 'contact'],
-  address: ['property address', 'address', 'street address', 'street', 'addr', 'residence'],
   unit: ['unit', 'apt', 'apartment', 'suite'],
   city: ['city', 'town', 'municipality'],
   postal: ['p-c', 'pc', 'postal', 'postal code', 'postcode', 'zip', 'zip code'],
@@ -107,13 +110,14 @@ export function guessMapping(headers: string[]): ColumnMapping {
 
   (Object.keys(HEADER_HINTS) as (keyof ColumnMapping)[]).forEach((field) => {
     const hints = HEADER_HINTS[field];
-    // "First Name" belongs to firstName even though it contains the word "name"
+    // "First Name" belongs to firstName and "Street Name" to the address, even
+    // though both contain the word "name"
     const splitNameColumn = field === 'name';
     let bestIdx = -1;
     let bestScore = 0;
     norm.forEach((h, i) => {
       if (!h || used.has(headers[i])) return;
-      if (splitNameColumn && /\b(first|last|given|sur|family|middle)\b/.test(h)) return;
+      if (splitNameColumn && /\b(first|last|given|sur|family|middle|street|address|road|city|unit|file)\b/.test(h)) return;
       let score = 0;
       hints.forEach((hint, rank) => {
         const weight = hints.length - rank;

@@ -4,13 +4,16 @@ import { guessMapping } from '../lib/normalize';
 import { readWorkbook, type SheetPreview } from '../lib/parse';
 import { readProjectFile } from '../lib/export';
 import { useStore } from '../state/store';
+import { COMMUNITIES, type CommunityId } from '../lib/communities';
 import { STATUS_MAP } from '../types';
 
 const FIELDS: { key: keyof ColumnMapping; label: string; hint?: string; required?: boolean }[] = [
   { key: 'name', label: 'Full name', hint: 'e.g. "AYUB, SAMIA"' },
   { key: 'firstName', label: 'First name', hint: 'only if the sheet splits names' },
   { key: 'lastName', label: 'Last name', hint: 'only if the sheet splits names' },
-  { key: 'address', label: 'Street address', required: true },
+  { key: 'address', label: 'Street address', hint: 'or just the street name, with the number below', required: true },
+  { key: 'streetNumber', label: 'Street number', hint: 'only if the sheet keeps it apart' },
+  { key: 'streetSuffix', label: 'Number suffix', hint: 'the A in 50A' },
   { key: 'unit', label: 'Unit / apt' },
   { key: 'city', label: 'City' },
   { key: 'postal', label: 'Postal / ZIP' },
@@ -42,7 +45,9 @@ export default function ImportWizard({ onClose, onImported }: Props) {
   const hasData = useStore((s) => s.households.length > 0);
   const groupHouseholds = useStore((s) => s.settings.groupHouseholds);
   // never the default when there is work on the map to lose
-  const [replace, setReplace] = useState(false);
+  const [mode, setMode] = useState<'replace' | 'append' | 'merge'>('merge');
+  const [community, setCommunity] = useState<CommunityId | ''>('');
+  const defaultCity = useStore((s) => s.settings.defaultCity);
 
   const sheet = sheets[sheetIdx];
   const preview = useMemo(() => sheet?.rows.slice(0, 6) ?? [], [sheet]);
@@ -80,7 +85,7 @@ export default function ImportWizard({ onClose, onImported }: Props) {
 
   const doImport = () => {
     if (!sheet || !mapping.address) return;
-    const replacing = replace || !hasData;
+    const replacing = !hasData || mode === 'replace';
     if (replacing && hasData) {
       const state = useStore.getState();
       const knocked = state.households.filter((h) => STATUS_MAP[h.status].knocked).length;
@@ -95,15 +100,16 @@ export default function ImportWizard({ onClose, onImported }: Props) {
         .join(', ');
       if (!confirm(`Replace everything on the map?\n\nThis deletes ${loss}. It cannot be undone.`)) return;
     }
-    const { added, skipped } = useStore
-      .getState()
-      .importRows(sheet.rows, mapping, sheet.headers, { replace: replacing });
-    useStore
-      .getState()
-      .notify(
-        `Imported ${added} door${added === 1 ? '' : 's'} from ${sheet.rows.length} rows` +
-          (skipped ? ` — ${skipped} row${skipped === 1 ? '' : 's'} had no address` : ''),
-      );
+    const { added, tagged, skipped } = useStore.getState().importRows(sheet.rows, mapping, sheet.headers, {
+      mode: replacing ? 'replace' : mode,
+      community: community || undefined,
+    });
+    const parts = [
+      tagged ? `Tagged ${tagged} door${tagged === 1 ? '' : 's'}` : '',
+      added ? `${tagged ? 'added' : 'Added'} ${added} new door${added === 1 ? '' : 's'}` : '',
+      skipped ? `${skipped} row${skipped === 1 ? '' : 's'} had no address` : '',
+    ].filter(Boolean);
+    useStore.getState().notify(parts.join(' · ') || 'Nothing to import');
     onImported();
   };
 
@@ -209,6 +215,44 @@ export default function ImportWizard({ onClose, onImported }: Props) {
             </div>
 
             <div className="wizard__options">
+              <label className="field">
+                <span>Everyone in this file is</span>
+                <select value={community} onChange={(e) => setCommunity(e.target.value as CommunityId | '')}>
+                  <option value="">— use the sheet's own column, if it has one —</option>
+                  {COMMUNITIES.filter((c) => c.id !== 'unknown').map((c) => (
+                    <option key={c.id} value={c.id}>
+                      {c.label}
+                    </option>
+                  ))}
+                </select>
+                <small className="muted">
+                  Pick a group to tag a single-community list — a Muslim list, a Punjabi list — as you load it.
+                </small>
+              </label>
+
+              {!mapping.city && (
+                <label className="field">
+                  <span>City or town these addresses are in</span>
+                  <input
+                    defaultValue={defaultCity}
+                    placeholder="e.g. Cambridge"
+                    onChange={(e) => useStore.getState().updateSettings({ defaultCity: e.target.value })}
+                  />
+                  <small className="muted">This sheet has no city column, and addresses need one to be found.</small>
+                </label>
+              )}
+
+              {hasData && (
+                <label className="field">
+                  <span>These doors should</span>
+                  <select value={mode} onChange={(e) => setMode(e.target.value as typeof mode)}>
+                    <option value="merge">Tag the doors already on the map (add any that are new)</option>
+                    <option value="append">Add as extra doors, even if the address repeats</option>
+                    <option value="replace">Replace everything on the map</option>
+                  </select>
+                </label>
+              )}
+
               <label className="check">
                 <input
                   type="checkbox"
@@ -217,12 +261,6 @@ export default function ImportWizard({ onClose, onImported }: Props) {
                 />
                 Group people at the same address into one door
               </label>
-              {hasData && (
-                <label className="check">
-                  <input type="checkbox" checked={replace} onChange={(e) => setReplace(e.target.checked)} />
-                  Delete the {useStore.getState().households.length} doors already on the map and start fresh
-                </label>
-              )}
             </div>
 
             <div className="preview">

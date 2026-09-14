@@ -24,7 +24,8 @@ export async function readWorkbook(file: File): Promise<SheetPreview[]> {
   // loaded on demand so the 400kB spreadsheet parser is not in the first paint
   const XLSX = await import('xlsx');
   const buf = await file.arrayBuffer();
-  const wb = XLSX.read(buf, { type: 'array', cellDates: false });
+  // raw: a CSV's "1/2" street suffix is a fraction on a house, not 2 January
+  const wb = XLSX.read(buf, { type: 'array', cellDates: false, raw: true });
   return wb.SheetNames.map((name) => {
     const ws = wb.Sheets[name];
     const matrix = XLSX.utils.sheet_to_json<string[]>(ws, { header: 1, blankrows: false, defval: '', raw: false });
@@ -91,11 +92,19 @@ export interface BuildResult {
   skipped: number;
 }
 
+export interface BuildOptions {
+  groupHouseholds: boolean;
+  defaultRegion?: string;
+  defaultCity?: string;
+  /** stamp every row in this file with one group — how a "Muslim list" is layered on */
+  forceCommunity?: CommunityId;
+}
+
 /** Turns mapped spreadsheet rows into households (map pins) + people (residents). */
 export function buildRecords(
   rows: Record<string, string>[],
   mapping: ColumnMapping,
-  opts: { groupHouseholds: boolean; defaultRegion?: string },
+  opts: BuildOptions,
 ): BuildResult {
   const households = new Map<string, Household>();
   const people: Person[] = [];
@@ -108,15 +117,25 @@ export function buildRecords(
       return col ? clean(row[col]) : '';
     };
 
-    const rawAddress = pick('address');
-    if (!rawAddress) {
+    // a list may carry one address column, or the number and the street name apart.
+    // "96" + "A" is 96A; "4" + "1/2" is 4 1/2 — a letter joins on, anything else
+    // keeps its space.
+    const streetNumber = pick('streetNumber');
+    const suffix = pick('streetSuffix');
+    const number = suffix
+      ? /^[A-Za-z]$/.test(suffix)
+        ? `${streetNumber}${suffix.toUpperCase()}`
+        : `${streetNumber} ${suffix}`
+      : streetNumber;
+    const rawAddress = [number, pick('address')].filter(Boolean).join(' ');
+    if (!pick('address')) {
       skipped++;
       return;
     }
 
     const { street, unit: parsedUnit } = splitUnit(rawAddress);
     const unit = pick('unit') || parsedUnit || '';
-    const city = pick('city');
+    const city = pick('city') || opts.defaultCity || '';
     const postal = normalizePostal(pick('postal'));
     const key = opts.groupHouseholds
       ? householdKey(street, unit, city, postal)
@@ -156,7 +175,7 @@ export function buildRecords(
     const first = pick('firstName') ? titleCase(pick('firstName')) : parsed.first;
     const last = pick('lastName') ? titleCase(pick('lastName')) : parsed.last;
 
-    const community: CommunityId | undefined = normalizeCommunity(pick('community'));
+    const community: CommunityId | undefined = opts.forceCommunity ?? normalizeCommunity(pick('community'));
     if (community && household.community === 'unknown') {
       household.community = community;
       household.communitySource = 'file';

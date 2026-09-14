@@ -119,6 +119,9 @@ export interface ColumnMapping {
   firstName?: string;
   lastName?: string;
   address?: string;
+  /** when the sheet splits the address: "50" + "A" + "Aberdeen Rd N" */
+  streetNumber?: string;
+  streetSuffix?: string;
   unit?: string;
   city?: string;
   postal?: string;
@@ -141,6 +144,8 @@ export interface Settings {
   /** who is knocking right now — stamped onto notes and knocks */
   activeCanvasserId?: string;
   groupHouseholds: boolean;
+  /** used when the list has no city column of its own */
+  defaultCity: string;
   /** what the pin colour means on the map */
   colorBy: 'community' | 'response';
   /** keep the GPS following while walking a turf */

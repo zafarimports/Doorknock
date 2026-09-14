@@ -11,12 +11,28 @@ import type {
   Turf,
 } from '../types';
 import { STATUS_MAP } from '../types';
-import { uid } from '../lib/normalize';
+import { householdKey, uid } from '../lib/normalize';
 import type { GeocodeProgress } from '../lib/geocode';
 import { buildRecords } from '../lib/parse';
 import { pointInPolygon } from '../lib/geo';
 import type { CommunityId } from '../lib/communities';
 import type { PersistedState } from '../lib/storage';
+
+export interface ImportOptions {
+  /** replace everything, add alongside, or tag the doors already on the map */
+  mode: 'replace' | 'append' | 'merge';
+  /** stamp every row with this group — how a single-community list is layered on */
+  community?: CommunityId;
+}
+
+export interface ImportResult {
+  added: number;
+  tagged: number;
+  skipped: number;
+}
+
+/** Same door, whatever list it arrived in. */
+const keyOf = (h: Household): string => householdKey(h.address, h.unit ?? '', h.city ?? '', h.postal ?? '');
 
 export const TURF_COLORS = ['#f97316', '#22d3ee', '#a78bfa', '#f472b6', '#84cc16', '#facc15', '#60a5fa', '#fb7185'];
 
@@ -37,6 +53,7 @@ export type MapMode = 'browse' | 'draw-turf' | 'place-pin';
 export const defaultSettings: Settings = {
   contactEmail: '',
   defaultCountry: 'Canada',
+  defaultCity: '',
   geocoder: 'nominatim',
   mapboxToken: '',
   groupHouseholds: true,
@@ -73,8 +90,8 @@ interface State {
     rows: Record<string, string>[],
     mapping: ColumnMapping,
     columns: string[],
-    opts: { replace: boolean },
-  ) => { added: number; skipped: number };
+    opts: ImportOptions,
+  ) => ImportResult;
   loadProject: (project: ProjectFile) => void;
 
   select: (id?: string) => void;
@@ -149,19 +166,71 @@ export const useStore = create<State>((set, get) => ({
     const { settings } = get();
     const { households, people, skipped } = buildRecords(rows, mapping, {
       groupHouseholds: settings.groupHouseholds,
-      defaultRegion: undefined,
+      defaultCity: settings.defaultCity,
+      forceCommunity: opts.community,
     });
+
+    if (opts.mode === 'merge') {
+      // A community list is an overlay on doors that already exist: match by
+      // address, tag what is there, and only add doors the base list missed.
+      const existing = get().households;
+      const byKey = new Map(existing.map((h) => [keyOf(h), h]));
+      const matched: Household[] = [];
+      const fresh: Household[] = [];
+      const freshPeople: Person[] = [];
+      const remap = new Map<string, string>();
+
+      households.forEach((incoming) => {
+        const hit = byKey.get(keyOf(incoming));
+        if (hit) {
+          matched.push(hit);
+          remap.set(incoming.id, hit.id);
+        } else {
+          fresh.push(incoming);
+          remap.set(incoming.id, incoming.id);
+        }
+      });
+
+      const matchedIds = new Set(matched.map((h) => h.id));
+      const knownNames = new Set(
+        get().people.map((p) => `${p.householdId}|${p.name.toLowerCase()}`),
+      );
+      people.forEach((p) => {
+        const householdId = remap.get(p.householdId) ?? p.householdId;
+        const isNewPerson = !knownNames.has(`${householdId}|${p.name.toLowerCase()}`);
+        if (isNewPerson) freshPeople.push({ ...p, householdId });
+      });
+
+      set((s) => ({
+        dataVersion: s.dataVersion + 1,
+        households: [
+          ...s.households.map((h) =>
+            matchedIds.has(h.id) && opts.community
+              ? { ...h, community: opts.community, communitySource: 'file' as const, updatedAt: Date.now() }
+              : h,
+          ),
+          ...fresh,
+        ],
+        people: [...s.people, ...freshPeople],
+        sourceColumns: [...new Set([...s.sourceColumns, ...columns])],
+        selectedHouseholdId: undefined,
+      }));
+      get().recomputeTurfMembership();
+      return { added: fresh.length, tagged: matched.length, skipped };
+    }
+
+    const replace = opts.mode === 'replace';
     set((s) => ({
       dataVersion: s.dataVersion + 1,
-      households: opts.replace ? households : [...s.households, ...households],
-      people: opts.replace ? people : [...s.people, ...people],
-      sourceColumns: opts.replace ? columns : [...new Set([...s.sourceColumns, ...columns])],
-      turfs: opts.replace ? [] : s.turfs,
+      households: replace ? households : [...s.households, ...households],
+      people: replace ? people : [...s.people, ...people],
+      sourceColumns: replace ? columns : [...new Set([...s.sourceColumns, ...columns])],
+      turfs: replace ? [] : s.turfs,
       selectedHouseholdId: undefined,
       filters: emptyFilters,
     }));
     get().recomputeTurfMembership();
-    return { added: households.length, skipped };
+    return { added: households.length, tagged: 0, skipped };
   },
 
   loadProject: (project) => {

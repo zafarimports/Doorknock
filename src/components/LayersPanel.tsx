@@ -24,6 +24,12 @@ export default function LayersPanel({ onClose }: Props) {
     return map;
   }, [households]);
 
+  // a list with two communities in it should show two layers, not six empty ones
+  const groupsInUse = useMemo(
+    () => COMMUNITIES.filter((c) => (counts.get(c.id) ?? 0) > 0 || hidden.includes(c.id)),
+    [counts, hidden],
+  );
+
   return (
     <div className="sheet sheet--right" role="dialog" aria-label="Map layers">
       <header className="sheet__head">
@@ -36,7 +42,7 @@ export default function LayersPanel({ onClose }: Props) {
       <section className="sheet__section">
         <h3>Show on the map</h3>
         <ul className="layer-list">
-          {COMMUNITIES.map((c) => {
+          {groupsInUse.map((c) => {
             const count = counts.get(c.id) ?? 0;
             const on = !hidden.includes(c.id);
             return (
@@ -61,7 +67,7 @@ export default function LayersPanel({ onClose }: Props) {
             onClick={() =>
               hidden.length
                 ? useStore.getState().setFilters({ hiddenCommunities: [] })
-                : useStore.getState().setFilters({ hiddenCommunities: COMMUNITIES.map((c) => c.id) })
+                : useStore.getState().setFilters({ hiddenCommunities: groupsInUse.map((c) => c.id) })
             }
           >
             {hidden.length ? 'Show all groups' : 'Hide all groups'}

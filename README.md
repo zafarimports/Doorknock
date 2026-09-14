@@ -18,6 +18,8 @@ servers. They load normally on a real network._
 - `.xlsx`, `.xls` or `.csv`, read in the browser — the file is never uploaded anywhere.
 - Guesses which column is the name, address, city, postal code, poll, community, and so on, and
   lets you fix any of them before importing.
+- Handles a split address — `Street #` + `Street # Suffix` + `Street Name` + `Unit #` — as well as a
+  single address column, and asks for a city when the sheet has no city column.
 - People at the same address become one door with several residents.
 - Understands `LASTNAME, FIRSTNAME`, strips `UNIT 27` off an address, and re-spaces Canadian
   postal codes (`N1S4C2` → `N1S 4C2`).
@@ -26,8 +28,12 @@ servers. They load normally on a real network._
 **Communities on the map**
 - Every door belongs to a group: **Muslim**, **Punjabi / Sikh**, **Hindu**, **Other minority**,
   **Everyone else**, or **Not classified**.
-- The group comes from a column in your list (called Community, Group, Religion, Ethnicity…) or
-  from one tap on the door sheet.
+- The group comes from a column in your list (called Community, Group, Religion, Ethnicity…), from
+  **tagging a whole file** as one group while importing it, or from one tap on the door sheet.
+- That tagging is how single-community lists work: load the full ward list first, then load a
+  Muslim list and a Punjabi list on top with **"Everyone in this file is"** set. Matching doors are
+  tagged in place rather than duplicated, and any address the ward list missed is added.
+- Only groups that actually have doors appear in the layer panel.
 - Pins are coloured by group, and the ◍ **Layers** panel switches any group on or off, so you can
   walk one community's doors and hide the rest.
 - Switch pin colour to **Response** when you'd rather see support and opposition.

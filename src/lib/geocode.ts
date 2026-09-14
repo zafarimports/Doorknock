@@ -15,14 +15,18 @@ const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 const NOMINATIM_DELAY = 1150;
 const MAPBOX_DELAY = 120;
 
+/**
+ * One lookup per building, not per unit: thirty apartments at the same street
+ * address share a position, and the pins are spread apart on the map anyway.
+ */
 export function cacheKeyFor(h: Household, settings: Settings): string {
-  return [h.address, h.unit ?? '', h.city ?? '', normalizePostal(h.postal ?? ''), h.region ?? '', settings.defaultCountry]
+  return [h.address, h.city ?? settings.defaultCity, normalizePostal(h.postal ?? ''), h.region ?? '', settings.defaultCountry]
     .join('|')
     .toUpperCase();
 }
 
 function queryString(h: Household, settings: Settings): string {
-  return [h.address, h.city, h.region, normalizePostal(h.postal ?? ''), settings.defaultCountry]
+  return [h.address, h.city || settings.defaultCity, h.region, normalizePostal(h.postal ?? ''), settings.defaultCountry]
     .filter(Boolean)
     .join(', ');
 }
@@ -42,7 +46,7 @@ async function nominatim(
     street: h.address,
     country: settings.defaultCountry || 'Canada',
   });
-  if (h.city) params.set('city', h.city);
+  if (h.city || settings.defaultCity) params.set('city', h.city || settings.defaultCity);
   if (h.postal) params.set('postalcode', normalizePostal(h.postal));
   if (h.region) params.set('state', h.region);
   if (settings.contactEmail) params.set('email', settings.contactEmail);

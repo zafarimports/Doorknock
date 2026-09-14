@@ -63,7 +63,7 @@ export default function App() {
         const sheets = await readWorkbook(new File([demo.csv], 'demo.csv', { type: 'text/csv' }));
         const sheet = sheets[0];
         if (sheet?.rows.length) {
-          useStore.getState().importRows(sheet.rows, guessMapping(sheet.headers), sheet.headers, { replace: true });
+          useStore.getState().importRows(sheet.rows, guessMapping(sheet.headers), sheet.headers, { mode: 'replace' });
           if (demo.note) useStore.getState().notify(demo.note);
         }
       }
