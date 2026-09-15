@@ -17,3 +17,7 @@ android/app/src/main/assets/capacitor.config.json
 android/app/src/main/assets/capacitor.plugins.json
 android/capacitor-cordova-android-plugins
 doorknock-v1-debug.apk
+
+# a preloaded voter list is real personal data — never commit it
+public/preload.json
+doorknock-ward5-muslim.apk

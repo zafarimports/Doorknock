@@ -4,7 +4,7 @@ import { guessMapping } from '../lib/normalize';
 import { readWorkbook, type SheetPreview } from '../lib/parse';
 import { readProjectFile } from '../lib/export';
 import { useStore } from '../state/store';
-import { COMMUNITIES, type CommunityId } from '../lib/communities';
+import { UNCLASSIFIED, type CommunityId } from '../lib/communities';
 import { STATUS_MAP } from '../types';
 
 const FIELDS: { key: keyof ColumnMapping; label: string; hint?: string; required?: boolean }[] = [
@@ -48,6 +48,7 @@ export default function ImportWizard({ onClose, onImported }: Props) {
   const [mode, setMode] = useState<'replace' | 'append' | 'merge'>('merge');
   const [community, setCommunity] = useState<CommunityId | ''>('');
   const defaultCity = useStore((s) => s.settings.defaultCity);
+  const groups = useStore((s) => s.communities);
 
   const sheet = sheets[sheetIdx];
   const preview = useMemo(() => sheet?.rows.slice(0, 6) ?? [], [sheet]);
@@ -217,13 +218,27 @@ export default function ImportWizard({ onClose, onImported }: Props) {
             <div className="wizard__options">
               <label className="field">
                 <span>Everyone in this file is</span>
-                <select value={community} onChange={(e) => setCommunity(e.target.value as CommunityId | '')}>
+                <select
+                  value={community}
+                  onChange={(e) => {
+                    if (e.target.value === '__new__') {
+                      const label = prompt('Name the group (Black, Portuguese, Tamil…)');
+                      if (!label?.trim()) return;
+                      setCommunity(useStore.getState().addCommunity(label).id);
+                      return;
+                    }
+                    setCommunity(e.target.value as CommunityId | '');
+                  }}
+                >
                   <option value="">— use the sheet's own column, if it has one —</option>
-                  {COMMUNITIES.filter((c) => c.id !== 'unknown').map((c) => (
-                    <option key={c.id} value={c.id}>
-                      {c.label}
-                    </option>
-                  ))}
+                  {groups
+                    .filter((c) => c.id !== UNCLASSIFIED)
+                    .map((c) => (
+                      <option key={c.id} value={c.id}>
+                        {c.label}
+                      </option>
+                    ))}
+                  <option value="__new__">+ New group…</option>
                 </select>
                 <small className="muted">
                   Pick a group to tag a single-community list — a Muslim list, a Punjabi list — as you load it.

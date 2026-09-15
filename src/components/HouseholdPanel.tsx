@@ -3,7 +3,7 @@ import { STATUSES, STATUS_MAP, type DoorStatus } from '../types';
 import { peopleOf, useStore } from '../state/store';
 import { useWalkOrder } from '../state/useVisible';
 import { displayAddress } from '../lib/normalize';
-import { COMMUNITIES } from '../lib/communities';
+import { UNCLASSIFIED } from '../lib/communities';
 
 /** The four responses that cover almost every door. */
 const PRIMARY: DoorStatus[] = ['support', 'not_home', 'undecided', 'oppose'];
@@ -24,6 +24,7 @@ export default function HouseholdPanel() {
   const residents = useStore((s) => (id ? peopleOf(s, id) : []));
   const turf = useStore((s) => s.turfs.find((t) => t.id === household?.turfId));
   const sourceColumns = useStore((s) => s.sourceColumns);
+  const groups = useStore((s) => s.communities);
   const walk = useWalkOrder();
 
   const [note, setNote] = useState('');
@@ -113,20 +114,33 @@ export default function HouseholdPanel() {
         <section className="door-panel__section">
           <h3>Community</h3>
           <div className="tag-row">
-            {COMMUNITIES.filter((c) => c.id !== 'unknown').map((c) => (
-              <button
-                key={c.id}
-                className={`community-chip ${household.community === c.id ? 'community-chip--on' : ''}`}
-                style={{ '--chip': c.color } as React.CSSProperties}
-                onClick={() =>
-                  useStore
-                    .getState()
-                    .setCommunity(household.id, household.community === c.id ? 'unknown' : c.id)
-                }
-              >
-                {c.label}
-              </button>
-            ))}
+            {groups
+              .filter((c) => c.id !== UNCLASSIFIED)
+              .map((c) => (
+                <button
+                  key={c.id}
+                  className={`community-chip ${household.community === c.id ? 'community-chip--on' : ''}`}
+                  style={{ '--chip': c.color } as React.CSSProperties}
+                  onClick={() =>
+                    useStore
+                      .getState()
+                      .setCommunity(household.id, household.community === c.id ? UNCLASSIFIED : c.id)
+                  }
+                >
+                  {c.label}
+                </button>
+              ))}
+            <button
+              className="community-chip community-chip--add"
+              onClick={() => {
+                const label = prompt('Name the group (Black, Portuguese, Tamil…)');
+                if (!label?.trim()) return;
+                const group = useStore.getState().addCommunity(label);
+                useStore.getState().setCommunity(household.id, group.id);
+              }}
+            >
+              + New group
+            </button>
           </div>
           <p className="muted small">
             {household.communitySource === 'file'

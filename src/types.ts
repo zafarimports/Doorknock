@@ -1,4 +1,4 @@
-import type { CommunityId, CommunitySource } from './lib/communities';
+import type { CommunityId, CommunityMeta, CommunitySource } from './lib/communities';
 
 export type DoorStatus =
   | 'not_started'
@@ -156,10 +156,13 @@ export interface Settings {
 export interface ProjectFile {
   version: 1;
   exportedAt: number;
+  /** a preloaded build can open on one group, e.g. { onlyCommunity: 'muslim' } */
+  initialFilter?: { onlyCommunity?: CommunityId };
   households: Household[];
   people: Person[];
   turfs: Turf[];
   canvassers: Canvasser[];
+  communities?: CommunityMeta[];
   settings: Settings;
   sourceColumns: string[];
 }

@@ -1,5 +1,6 @@
 import { get, set, del } from 'idb-keyval';
 import type { Canvasser, Household, Person, Settings, Turf } from '../types';
+import type { CommunityMeta } from './communities';
 
 const KEY = 'doorknock:project:v2';
 const GEO_KEY = 'doorknock:geocache:v1';
@@ -9,6 +10,7 @@ export interface PersistedState {
   people: Person[];
   turfs: Turf[];
   canvassers: Canvasser[];
+  communities?: CommunityMeta[];
   settings: Settings;
   sourceColumns: string[];
 }

@@ -15,7 +15,14 @@ import { householdKey, uid } from '../lib/normalize';
 import type { GeocodeProgress } from '../lib/geocode';
 import { buildRecords } from '../lib/parse';
 import { pointInPolygon } from '../lib/geo';
-import type { CommunityId } from '../lib/communities';
+import {
+  EXTRA_COLORS,
+  PRESET_COMMUNITIES,
+  UNCLASSIFIED,
+  idForLabel,
+  type CommunityId,
+  type CommunityMeta,
+} from '../lib/communities';
 import type { PersistedState } from '../lib/storage';
 
 export interface ImportOptions {
@@ -67,6 +74,8 @@ interface State {
   people: Person[];
   turfs: Turf[];
   canvassers: Canvasser[];
+  /** the groups this campaign uses — presets plus any it added itself */
+  communities: CommunityMeta[];
   settings: Settings;
   sourceColumns: string[];
   hydrated: boolean;
@@ -107,6 +116,9 @@ interface State {
   toggleTag: (householdId: string, tag: string) => void;
   setCommunity: (householdId: string, community: CommunityId) => void;
   toggleCommunityLayer: (community: CommunityId) => void;
+  /** show one group and hide the rest — the filter a canvasser actually wants */
+  showOnlyCommunity: (community?: CommunityId) => void;
+  addCommunity: (label: string) => CommunityMeta;
   updatePerson: (personId: string, patch: Partial<Person>) => void;
   moveHousehold: (householdId: string, lat: number, lng: number) => void;
   applyGeocode: (householdId: string, hit: { lat: number; lng: number; label?: string; precision?: string } | null) => void;
@@ -139,6 +151,7 @@ export const useStore = create<State>((set, get) => ({
   people: [],
   turfs: [],
   canvassers: [],
+  communities: PRESET_COMMUNITIES,
   settings: defaultSettings,
   sourceColumns: [],
   hydrated: false,
@@ -156,6 +169,7 @@ export const useStore = create<State>((set, get) => ({
       people: state.people ?? [],
       turfs: state.turfs ?? [],
       canvassers: state.canvassers ?? [],
+      communities: state.communities?.length ? state.communities : PRESET_COMMUNITIES,
       settings: { ...defaultSettings, ...(state.settings ?? {}) },
       sourceColumns: state.sourceColumns ?? [],
       hydrated: true,
@@ -241,6 +255,7 @@ export const useStore = create<State>((set, get) => ({
       people: project.people,
       turfs: project.turfs ?? [],
       canvassers: project.canvassers ?? [],
+      communities: project.communities?.length ? project.communities : PRESET_COMMUNITIES,
       settings: { ...defaultSettings, ...project.settings },
       sourceColumns: project.sourceColumns ?? [],
       selectedHouseholdId: undefined,
@@ -337,6 +352,30 @@ export const useStore = create<State>((set, get) => ({
         p.householdId === householdId ? { ...p, community, communitySource: 'manual' } : p,
       ),
     })),
+
+  showOnlyCommunity: (community) =>
+    set((s) => ({
+      filters: {
+        ...s.filters,
+        hiddenCommunities: community ? s.communities.map((c) => c.id).filter((id) => id !== community) : [],
+      },
+    })),
+
+  addCommunity: (label) => {
+    const existing = get().communities.find((c) => c.label.toLowerCase() === label.trim().toLowerCase());
+    if (existing) return existing;
+    const communities = get().communities;
+    const group: CommunityMeta = {
+      id: idForLabel(label),
+      label: label.trim(),
+      color: EXTRA_COLORS[communities.filter((c) => !PRESET_COMMUNITIES.includes(c)).length % EXTRA_COLORS.length],
+    };
+    // keep "Not classified" last, where it reads as the leftovers
+    set({
+      communities: [...communities.filter((c) => c.id !== UNCLASSIFIED), group, ...communities.filter((c) => c.id === UNCLASSIFIED)],
+    });
+    return group;
+  },
 
   toggleCommunityLayer: (community) =>
     set((s) => ({

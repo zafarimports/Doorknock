@@ -8,6 +8,7 @@ import { useStore } from './state/store';
 import { useVisibleHouseholds } from './state/useVisible';
 import { loadState, requestPersistence, saveState } from './lib/storage';
 import { getDemo } from './lib/demo';
+import { loadPreloadedProject } from './lib/preload';
 import { readWorkbook } from './lib/parse';
 import { guessMapping } from './lib/normalize';
 import { STATUS_MAP } from './types';
@@ -57,9 +58,16 @@ export default function App() {
           sourceColumns: [],
         },
       );
+      if (useStore.getState().households.length) return;
+
+      // a build can ship its own list — the ward already imported, tagged and
+      // placed — so a canvasser opens the app on a map, not on a file picker
+      const loaded = await loadPreloadedProject();
+      if (loaded) return;
+
       // a demo build ships a starter list so the map is never empty on arrival
       const demo = getDemo();
-      if (demo?.csv && !useStore.getState().households.length) {
+      if (demo?.csv) {
         const sheets = await readWorkbook(new File([demo.csv], 'demo.csv', { type: 'text/csv' }));
         const sheet = sheets[0];
         if (sheet?.rows.length) {

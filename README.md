@@ -26,8 +26,11 @@ servers. They load normally on a real network._
 - Columns you don't map are kept and come back in the export.
 
 **Communities on the map**
-- Every door belongs to a group: **Muslim**, **Punjabi / Sikh**, **Hindu**, **Other minority**,
-  **Everyone else**, or **Not classified**.
+- Every door belongs to a group. **Muslim**, **Punjabi / Sikh**, **Hindu**, **Black**, **Other
+  minority** and **Everyone else** come as presets, and you can add your own — Portuguese, Tamil,
+  anything — from the Layers panel, the door sheet, or while importing a list.
+- The ◍ panel gives each group a switch and an **Only** button: one tap to walk just that group's
+  doors and hide everything else.
 - The group comes from a column in your list (called Community, Group, Religion, Ethnicity…), from
   **tagging a whole file** as one group while importing it, or from one tap on the door sheet.
 - That tagging is how single-community lists work: load the full ward list first, then load a
@@ -66,6 +69,32 @@ servers. They load normally on a real network._
 - An `.xlsx` that keeps every original column and adds status, knocked-at, visits, notes, tags,
   community, turf, canvasser and coordinates.
 - A project `.json` that carries the whole workspace to another device.
+
+## Shipping a build with the list already in it
+
+A canvasser should open the app on a map, not on a file picker. Build a `preload.json` and it will
+be loaded on first launch:
+
+```bash
+# 1. exact coordinates from the city's open address data (no geocoding queue)
+node scripts/fetch-address-points.mjs addresses.json
+node scripts/join-coordinates.mjs ward5.csv addresses.json ward5-located.csv
+
+# 2. build the preload: base list, plus a file per community, plus the group to open on
+npm run build
+npm run preload -- --base ward5-located.csv \
+  --group "Muslim=muslim-voters.xlsx" \
+  --city Cambridge --only muslim
+```
+
+That writes `public/preload.json`, which the next `npm run build` / `npx cap sync android` bundles
+into the app. Regenerating it drives the real app in a headless browser (`npm i -D playwright &&
+npx playwright install chromium`), so the preload is built by exactly the import code a canvasser
+would run.
+
+**`public/preload.json` is gitignored, and must stay that way.** It holds real names and home
+addresses; this repository is public and GitHub Pages serves whatever is in `dist/`. Ship it inside
+an APK you hand to your own team.
 
 ## Run it on the web
 

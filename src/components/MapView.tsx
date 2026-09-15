@@ -5,7 +5,7 @@ import 'leaflet.markercluster';
 import 'leaflet.markercluster/dist/MarkerCluster.css';
 import 'leaflet.markercluster/dist/MarkerCluster.Default.css';
 import { STATUS_MAP, type Household } from '../types';
-import { COMMUNITY_MAP } from '../lib/communities';
+import { communityMeta, type CommunityMeta } from '../lib/communities';
 import { useStore } from '../state/store';
 import { useVisibleHouseholds } from '../state/useVisible';
 import { initialsOf } from '../lib/normalize';
@@ -72,13 +72,19 @@ function packedTileLayer(): L.TileLayer | undefined {
   }) as L.TileLayer;
 }
 
-function pinColor(h: Household, colorBy: 'community' | 'response'): string {
-  return colorBy === 'community' ? COMMUNITY_MAP[h.community].color : STATUS_MAP[h.status].color;
+function pinColor(h: Household, colorBy: 'community' | 'response', groups: CommunityMeta[]): string {
+  return colorBy === 'community' ? communityMeta(groups, h.community).color : STATUS_MAP[h.status].color;
 }
 
-function pinIcon(h: Household, label: string, selected: boolean, colorBy: 'community' | 'response'): L.DivIcon {
+function pinIcon(
+  h: Household,
+  label: string,
+  selected: boolean,
+  colorBy: 'community' | 'response',
+  groups: CommunityMeta[],
+): L.DivIcon {
   const meta = STATUS_MAP[h.status];
-  const color = pinColor(h, colorBy);
+  const color = pinColor(h, colorBy, groups);
   const cls = ['pin', meta.knocked ? 'pin--knocked' : 'pin--new', selected ? 'pin--selected' : ''].join(' ');
   const check = meta.knocked
     ? '<svg class="pin__check" viewBox="0 0 24 24"><path d="M20 6 9 17l-5-5" fill="none" stroke="currentColor" stroke-width="3.5" stroke-linecap="round" stroke-linejoin="round"/></svg>'
@@ -117,6 +123,7 @@ export default function MapView() {
   const selectedId = useStore((s) => s.selectedHouseholdId);
   const mapMode = useStore((s) => s.mapMode);
   const colorBy = useStore((s) => s.settings.colorBy);
+  const groups = useStore((s) => s.communities);
   const basemap = useStore((s) => s.settings.basemap);
   const recenterRequest = useStore((s) => s.recenterRequest);
   const placingHouseholdId = useStore((s) => s.placingHouseholdId);
@@ -231,24 +238,24 @@ export default function MapView() {
       seenAtPoint.set(key, seen + 1);
       const [lat, lng] = jitter(h.lat!, h.lng!, seen);
       const selected = id === selectedId;
-      const sig = `${h.status}|${h.community}|${colorBy}|${selected}|${lat}|${lng}|${labels.get(id)}`;
+      const sig = `${h.status}|${h.community}|${colorBy}|${groups.length}|${selected}|${lat}|${lng}|${labels.get(id)}`;
       const existing = registry.get(id);
       if (existing) {
         if (existing.sig !== sig) {
           existing.marker.setLatLng([lat, lng]);
-          existing.marker.setIcon(pinIcon(h, labels.get(id) ?? '', selected, colorBy));
+          existing.marker.setIcon(pinIcon(h, labels.get(id) ?? '', selected, colorBy, groups));
           const meta = existing.marker.options as MarkerMeta;
           meta.knocked = STATUS_MAP[h.status].knocked;
-          meta.color = pinColor(h, colorBy);
+          meta.color = pinColor(h, colorBy, groups);
           existing.sig = sig;
         }
         return;
       }
       const marker = L.marker([lat, lng], {
-        icon: pinIcon(h, labels.get(id) ?? '', selected, colorBy),
+        icon: pinIcon(h, labels.get(id) ?? '', selected, colorBy, groups),
         title: h.address,
         knocked: STATUS_MAP[h.status].knocked,
-        color: pinColor(h, colorBy),
+        color: pinColor(h, colorBy, groups),
         riseOnHover: true,
       } as L.MarkerOptions);
       marker.on('click', () => useStore.getState().select(id));
@@ -258,7 +265,7 @@ export default function MapView() {
 
     if (toRemove.length) cluster.removeLayers(toRemove);
     if (toAdd.length) cluster.addLayers(toAdd);
-  }, [visible, selectedId, labels, colorBy]);
+  }, [visible, selectedId, labels, colorBy, groups]);
 
   // ---- fit to data once we have something to show --------------------------
   useEffect(() => {
