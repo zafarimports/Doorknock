@@ -12,9 +12,14 @@ import { useStore } from '../state/store';
 export async function loadPreloadedProject(): Promise<boolean> {
   try {
     const res = await fetch('preload.json', { cache: 'no-store' });
-    if (!res.ok) return false;
+    // no file is the normal case — a build without a list shipped inside it
+    if (res.status === 404) return false;
+    if (!res.ok) throw new Error(`preload.json returned ${res.status}`);
+
     const project = (await res.json()) as ProjectFile;
-    if (project?.version !== 1 || !Array.isArray(project.households) || !project.households.length) return false;
+    if (project?.version !== 1 || !Array.isArray(project.households) || !project.households.length) {
+      throw new Error('preload.json is not a Doorknock project');
+    }
 
     useStore.getState().loadProject(project);
     const only = project.initialFilter?.onlyCommunity;
@@ -32,7 +37,12 @@ export async function loadPreloadedProject(): Promise<boolean> {
           : `${project.households.length} doors ready`,
       );
     return true;
-  } catch {
+  } catch (err) {
+    // a build that was meant to arrive with a list should say so, not sit on an
+    // empty map looking like it works
+    if (err instanceof Error && !/Failed to fetch|NetworkError/.test(err.message)) {
+      useStore.getState().notify(`The list shipped with this app could not be loaded — ${err.message}`, 'error');
+    }
     return false;
   }
 }

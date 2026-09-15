@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import MapView from './components/MapView';
 import MenuPanel, { type MenuSection } from './components/MenuPanel';
 import LayersPanel from './components/LayersPanel';
+import GroupBar from './components/GroupBar';
 import HouseholdPanel from './components/HouseholdPanel';
 import ImportWizard from './components/ImportWizard';
 import { useStore } from './state/store';
@@ -170,12 +171,12 @@ export default function App() {
           ◎
         </button>
         <button
-          className={`topbar__btn ${layersOpen ? 'topbar__btn--on' : ''}`}
+          className={`topbar__btn topbar__btn--wide ${layersOpen ? 'topbar__btn--on' : ''}`}
           onClick={() => setLayersOpen((v) => !v)}
           aria-label="Layers"
-          title="Layers"
+          title="Groups and layers"
         >
-          ◍
+          Groups
         </button>
       </header>
 
@@ -196,6 +197,7 @@ export default function App() {
       <main className="workspace">
         <div className="map-area">
           <MapView />
+          <GroupBar />
           {empty && (
             <div className="empty">
               <div className="empty__card">
